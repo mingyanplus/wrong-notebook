@@ -520,7 +520,7 @@ describe('/api/error-items', () => {
             expect(mocks.mockPrismaErrorItem.findMany).toHaveBeenCalledWith(
                 expect.objectContaining({
                     where: expect.objectContaining({
-                        masteryLevel: { gt: 0 },
+                        masteryLevel: { gte: 2 },
                     }),
                 })
             );

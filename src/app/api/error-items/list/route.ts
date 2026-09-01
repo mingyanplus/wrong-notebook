@@ -62,7 +62,8 @@ export async function GET(req: Request) {
 
         // Mastery filter
         if (mastery !== null) {
-            whereClause.masteryLevel = mastery === "1" ? { gt: 0 } : 0;
+            // masteryLevel: 0 新录 / 1 复习中 / 2 已掌握
+            whereClause.masteryLevel = mastery === "1" ? { gte: 2 } : { lt: 2 };
         }
 
         // Time range filter
