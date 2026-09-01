@@ -3,10 +3,11 @@
 import { useLanguage } from "@/contexts/LanguageContext";
 import { WrongAnswerStats } from "@/components/wrong-answer-stats";
 import { PracticeStats } from "@/components/practice-stats";
+import { WeaknessStats } from "@/components/weakness-stats";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { BackButton } from "@/components/ui/back-button";
-import { BarChart3, TrendingUp, Activity, House } from "lucide-react";
+import { BarChart3, TrendingUp, Activity, House, Flame } from "lucide-react";
 import Link from "next/link";
 
 export default function StatsPage() {
@@ -35,7 +36,7 @@ export default function StatsPage() {
             </div>
 
             <Tabs defaultValue="wrong" className="w-full">
-                <TabsList className="grid w-full grid-cols-2 mb-6">
+                <TabsList className="grid w-full grid-cols-3 mb-6">
                     <TabsTrigger value="wrong" className="flex items-center gap-2">
                         <Activity className="h-4 w-4" />
                         {t.wrongAnswerStats?.title || "Wrong Answer Stats"}
@@ -44,6 +45,10 @@ export default function StatsPage() {
                         <TrendingUp className="h-4 w-4" />
                         {t.stats?.title || "Practice Stats"}
                     </TabsTrigger>
+                    <TabsTrigger value="weakness" className="flex items-center gap-2">
+                        <Flame className="h-4 w-4" />
+                        {t.stats?.weakness?.tabTitle || "薄弱知识点"}
+                    </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="wrong" className="space-y-4">
@@ -51,6 +56,9 @@ export default function StatsPage() {
                 </TabsContent>
                 <TabsContent value="practice" className="space-y-4">
                     <PracticeStats />
+                </TabsContent>
+                <TabsContent value="weakness" className="space-y-4">
+                    <WeaknessStats />
                 </TabsContent>
             </Tabs>
         </div>
