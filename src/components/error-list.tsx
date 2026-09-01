@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Filter, CheckCircle, Clock, ChevronDown, Printer, ListChecks, Trash2, X, Bell } from "lucide-react";
+import { Search, Filter, CheckCircle, Clock, ChevronDown, Printer, ListChecks, Trash2, X, Bell, WandSparkles } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -50,6 +50,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const [chapterFilter, setChapterFilter] = useState("");
     const [paperLevelFilter, setPaperLevelFilter] = useState<"all" | "a" | "b" | "other">("all");
     const [errorCategoryFilter, setErrorCategoryFilter] = useState<string>("all");
+    const [isBackfilling, setIsBackfilling] = useState(false);
     const [selectedTag, setSelectedTag] = useState<string | null>(null);
     const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
     // 到期待复习（艾宾浩斯计划）
@@ -400,6 +401,32 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                             ))}
                         </SelectContent>
                     </Select>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isBackfilling}
+                        onClick={async () => {
+                            if (isBackfilling) return;
+                            if (!confirm(t.filter.backfillConfirm || "将使用 AI 为缺少错因/题型/标签的错题批量补全（每次最多 20 题），继续？")) return;
+                            setIsBackfilling(true);
+                            try {
+                                const result = await apiClient.post<{ processed: number; updated: number; failedCount: number }>("/api/error-items/backfill", {}, { timeout: 600000 });
+                                alert((t.filter.backfillDone || "补全完成：处理 {n} 题，更新 {u} 题")
+                                    .replace("{n}", String(result.processed))
+                                    .replace("{u}", String(result.updated)));
+                                fetchItems();
+                            } catch (err) {
+                                console.error(err);
+                                alert(t.filter.backfillFailed || "批量补全失败");
+                            } finally {
+                                setIsBackfilling(false);
+                            }
+                        }}
+                        title={t.filter.backfill || "批量补全"}
+                    >
+                        <WandSparkles className={`h-4 w-4 ${isBackfilling ? "animate-pulse" : ""}`} />
+                        <span className="hidden sm:inline">{isBackfilling ? (t.filter.backfillRunning || "补全中…") : (t.filter.backfill || "批量补全")}</span>
+                    </Button>
                 </div>
             </div>
 

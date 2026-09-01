@@ -678,3 +678,76 @@ export function generateReanswerPrompt(
     provider_hints: options?.providerHints || ''
   }).trim();
 }
+
+/**
+ * 批量补全元数据提示词（B4：为历史/导入错题补 标签+题型+错因）
+ */
+export const DEFAULT_BACKFILL_PROMPT = `你是一位跨学科教育专家。请分析以下已收录的错题，补全它的知识点标签、题型，以及（如果有学生错误作答）结构化错因。
+
+【题目 (QUESTION)】
+{{question_text}}
+
+【正确答案 (ANSWER)】
+{{answer_text}}
+
+【解析 (ANALYSIS)】
+{{analysis}}
+
+【学生错误作答 (WRONG ANSWER)】
+{{wrong_answer_text}}
+
+{{subject_hint}}
+
+【核心输出要求 (OUTPUT REQUIREMENTS)】
+你的响应输出**必须严格遵循以下自定义标签格式**。**严禁**使用 JSON 或 Markdown 代码块。
+
+请严格按照以下结构输出内容（不要包含任何其他文字）：
+
+<knowledge_points>
+在此处填写该题考查的知识点，使用逗号分隔，最多 5 个。{{knowledge_points_list}}
+</knowledge_points>
+
+<question_type>
+填写以下值之一：choice（选择题）、fill（填空题）、solve（解答题/计算题/主观题）、judge（判断题）。
+</question_type>
+
+<error_category>
+{{error_category_instruction}}
+</error_category>
+
+<secondary_error_categories>
+次要错误原因，最多 2 个，用逗号分隔填写 code；没有则留空。
+</secondary_error_categories>
+
+【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
+1. **格式严格**：必须严格包含上述 4 个 XML 标签，不要输出其他内容。
+2. **不要猜测**：没有学生错误作答时，error_category 必须填 unknown。`;
+
+export interface BackfillPromptParams {
+  questionText: string;
+  answerText?: string;
+  analysis?: string;
+  wrongAnswerText?: string;
+  subject?: string | null;
+  tagList?: string; // 可注入的候选标签列表
+}
+
+export function generateBackfillPrompt(params: BackfillPromptParams): string {
+  const subjectHint = params.subject
+    ? `本题学科：${params.subject}`
+    : "请根据题目内容判断学科。";
+
+  const hasWrong = !!(params.wrongAnswerText && params.wrongAnswerText.trim());
+  const errorCategoryInstruction = hasWrong
+    ? `根据学生的错误作答分析主要错因，填写以下 code 之一：concept（概念不清）、formula（公式记错）、calculation（计算失误）、misread（审题偏差）、method（方法选择错误）、stuck（思路卡壳）、expression（表述不规范）、careless（粗心/时间不足）、vocab（词义混淆，英语）、trap（设错点误判，语文选择题）、recall（记忆性错误，史地政）。`
+    : "本题没有学生错误作答记录，直接填写 unknown。";
+
+  return DEFAULT_BACKFILL_PROMPT.replace('{{question_text}}', params.questionText)
+    .replace('{{answer_text}}', params.answerText || '（无）')
+    .replace('{{analysis}}', params.analysis || '（无）')
+    .replace('{{wrong_answer_text}}', hasWrong ? params.wrongAnswerText! : '（无）')
+    .replace('{{subject_hint}}', subjectHint)
+    .replace('{{knowledge_points_list}}', params.tagList || '')
+    .replace('{{error_category_instruction}}', errorCategoryInstruction)
+    .trim();
+}

@@ -349,6 +349,11 @@ export const translations = {
             dueOverdueDays: "overdue {days}d",
             errorCategory: "All Categories",
             errorCategoryUnknown: "Uncategorized",
+            backfill: "AI Backfill",
+            backfillRunning: "Backfilling…",
+            backfillConfirm: "Use AI to backfill mistake category/question type/tags for up to 20 items per batch. Continue?",
+            backfillDone: "Done: processed {n}, updated {u}",
+            backfillFailed: "Backfill failed",
         },
         stats: {
             title: "Practice Statistics",
@@ -1018,6 +1023,11 @@ export const translations = {
             dueOverdueDays: "逾期 {days} 天",
             errorCategory: "全部错因",
             errorCategoryUnknown: "未分类",
+            backfill: "批量补全",
+            backfillRunning: "补全中…",
+            backfillConfirm: "将使用 AI 为缺少错因/题型/标签的错题批量补全（每次最多 20 题），继续？",
+            backfillDone: "补全完成：处理 {n} 题，更新 {u} 题",
+            backfillFailed: "批量补全失败",
         },
         stats: {
             title: "练习统计",

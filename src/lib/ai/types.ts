@@ -23,11 +23,20 @@ export interface GeogebraAnalysisResult {
     description: string;
 }
 
+/** 批量补全元数据结果（B4：标签 + 题型 + 错因） */
+export interface BackfillMetaResult {
+    knowledgePoints: string[];
+    questionType: "choice" | "fill" | "solve" | "judge";
+    errorCategory: string; // code 或 "unknown"
+    secondaryErrorCategories: string[];
+}
+
 export interface AIService {
     analyzeImage(imageBase64: string, mimeType?: string, language?: 'zh' | 'en', grade?: 7 | 8 | 9 | 10 | 11 | 12 | null, subject?: string | null, gradeSemester?: string | null): Promise<ParsedQuestionFromSchema>;
     generateSimilarQuestion(originalQuestion: string, knowledgePoints: string[], language?: 'zh' | 'en', difficulty?: DifficultyLevel, gradeSemester?: string | null): Promise<ParsedQuestionFromSchema>;
     reanswerQuestion(questionText: string, language?: 'zh' | 'en', subject?: string | null, imageBase64?: string, gradeSemester?: string | null): Promise<ReanswerQuestionResult>;
     analyzeForGeogebra(questionText: string, answerText: string, analysis: string, previousErrors?: string): Promise<GeogebraAnalysisResult>;
+    backfillMeta(questionText: string, answerText?: string, analysis?: string, wrongAnswerText?: string, subject?: string | null, tagList?: string): Promise<BackfillMetaResult>;
 }
 
 export interface AIConfig {

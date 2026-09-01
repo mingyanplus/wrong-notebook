@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult } from "./types";
-import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt } from './prompts';
+import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
+import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
 import { safeParseParsedQuestion } from './schema';
 import { getAppConfig } from '../config';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
@@ -404,6 +404,26 @@ export class GeminiProvider implements AIService {
             this.handleError(error);
             throw error;
         }
+    }
+
+    async backfillMeta(questionText: string, answerText?: string, analysis?: string, wrongAnswerText?: string, subject?: string | null, tagList?: string): Promise<BackfillMetaResult> {
+        const prompt = generateBackfillPrompt({ questionText, answerText, analysis, wrongAnswerText, subject, tagList });
+
+        const response = await this.retryOperation(() => this.ai.models.generateContent({
+            model: this.modelName,
+            contents: prompt
+        }));
+        const text = response.text || '';
+        if (!text) throw new Error("Empty response from AI");
+
+        const knowledgePointsRaw = this.extractTag(text, "knowledge_points") || "";
+        const errorCategory = parseErrorCategoryCode(this.extractTag(text, "error_category"));
+        return {
+            knowledgePoints: knowledgePointsRaw.split(/[,，\n]/).map((k) => k.trim()).filter((k) => k.length > 0).slice(0, 5),
+            questionType: parseQuestionTypeCode(this.extractTag(text, "question_type")),
+            errorCategory,
+            secondaryErrorCategories: parseSecondaryCategories(this.extractTag(text, "secondary_error_categories"), errorCategory),
+        };
     }
 
     private handleError(error: unknown) {
