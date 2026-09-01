@@ -307,17 +307,7 @@ function HomeContent() {
                 ? notebooks.find(n => n.id === targetNotebookId)
                 : undefined;
 
-            const result = await apiClient.post<{
-                answerText: string;
-                analysis: string;
-                knowledgePoints: string[];
-                wrongAnswerText: string;
-                mistakeAnalysis: string;
-                mistakeStatus: string;
-                errorCategory?: string;
-                secondaryErrorCategories?: string[];
-                questionType?: string;
-            }>("/api/reanswer", {
+            const result = await apiClient.post<ReanswerQuestionResult>("/api/reanswer", {
                 questionText,
                 language,
                 subject: matchedNotebook?.name || undefined,

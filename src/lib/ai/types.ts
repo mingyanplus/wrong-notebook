@@ -15,6 +15,10 @@ export interface ReanswerQuestionResult {
     wrongAnswerText: string;
     mistakeAnalysis: string;
     mistakeStatus: MistakeStatus;
+    // 手动输入流程补充（AI 重解时可能携带的错因/题型判定）
+    errorCategory?: string;
+    secondaryErrorCategories?: string[];
+    questionType?: string;
 }
 
 export interface GeogebraAnalysisResult {

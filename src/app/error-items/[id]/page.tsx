@@ -17,7 +17,8 @@ import { apiClient } from "@/lib/api-client";
 import { UserProfile, Notebook } from "@/types/api";
 import { inferSubjectFromName } from "@/lib/knowledge-tags";
 import { getMistakeStatusLabel, normalizeMistakeStatusForSave } from "@/lib/mistake-status";
-import { QUESTION_TYPES, getErrorCategoryLabel, getQuestionTypeLabel, getCategoriesForSubject } from "@/lib/error-categories";
+import { getErrorCategoryLabel, getQuestionTypeLabel } from "@/lib/error-categories";
+import { ErrorCategoryPicker } from "@/components/error-category-picker";
 import { NotebookSelector } from "@/components/notebook-selector";
 import { GeogebraDemo } from "@/components/geogebra-demo";
 
@@ -624,53 +625,17 @@ export default function ErrorDetailPage() {
                         <CardContent>
                             {isEditingMistake ? (
                                 <div className="space-y-4">
-                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                        <div className="space-y-2">
-                                            <label className="text-sm text-muted-foreground">{t.editor?.errorCategory || "主要错因"}</label>
-                                            <Select value={errorCategoryInput} onValueChange={(val) => {
-                                                setErrorCategoryInput(val);
-                                                setSecondaryCategoriesInput((prev) => prev.filter((c) => c !== val));
-                                            }}>
-                                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="unknown">{t.editor?.errorCategoryUnknown || "未判定"}</SelectItem>
-                                                    {getCategoriesForSubject(item.subject?.name).map((c) => (
-                                                        <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                            {errorCategoryInput !== "unknown" && (
-                                                <div className="flex flex-wrap gap-1.5 pt-1">
-                                                    {getCategoriesForSubject(item.subject?.name)
-                                                        .filter((c) => c.code !== errorCategoryInput)
-                                                        .map((c) => {
-                                                            const selected = secondaryCategoriesInput.includes(c.code);
-                                                            return (
-                                                                <button
-                                                                    key={c.code}
-                                                                    type="button"
-                                                                    onClick={() => setSecondaryCategoriesInput((prev) => selected ? prev.filter((x) => x !== c.code) : [...prev, c.code].slice(0, 2))}
-                                                                    className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background hover:bg-accent"}`}
-                                                                >
-                                                                    {c.label}
-                                                                </button>
-                                                            );
-                                                        })}
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="text-sm text-muted-foreground">{t.editor?.questionType || "题型"}</label>
-                                            <Select value={questionTypeInput} onValueChange={setQuestionTypeInput}>
-                                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                                <SelectContent>
-                                                    {QUESTION_TYPES.map((qt) => (
-                                                        <SelectItem key={qt.code} value={qt.code}>{qt.label}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    </div>
+                                    <ErrorCategoryPicker
+                                        subjectName={item.subject?.name}
+                                        errorCategory={errorCategoryInput}
+                                        secondaryErrorCategories={secondaryCategoriesInput}
+                                        questionType={questionTypeInput}
+                                        onChange={(next) => {
+                                            setErrorCategoryInput(next.errorCategory);
+                                            setSecondaryCategoriesInput(next.secondaryErrorCategories);
+                                            setQuestionTypeInput(next.questionType);
+                                        }}
+                                    />
                                     <div className="space-y-2">
                                         <label className="text-sm text-muted-foreground">{t.detail?.stuckPoint || "卡壳点/关键步骤"}</label>
                                         <Input value={stuckPointInput} onChange={(e) => setStuckPointInput(e.target.value)} placeholder={t.detail?.stuckPointPlaceholder || "记录当时卡在哪一步，供举一反三针对性出题"} />

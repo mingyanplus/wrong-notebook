@@ -7,7 +7,7 @@
  * 热力图 cell(tag, category) = Σ_item 该错因的贡献量（主 1.0 / 次 0.5）
  */
 import { WEAKNESS_CONFIG } from "./weakness-config";
-import { getErrorCategory, ERROR_CATEGORIES } from "./error-categories";
+import { getErrorCategory, ERROR_CATEGORIES, parseSecondaryCategoriesJson } from "./error-categories";
 
 export interface WeaknessItemInput {
     id: string;
@@ -104,6 +104,19 @@ export function computeWeaknessReport(
     const categories = ERROR_CATEGORIES.map((c) => ({ code: c.code as string, label: c.label }));
     const categoryIndex = new Map<string, number>(categories.map((c, i) => [c.code, i]));
 
+    // 预解析缓存：每题的次错因数组与 itemScore 只算一次（tag 聚合循环内复用）
+    const secondaryCache = new Map<string, string[]>();
+    const scoreCache = new Map<string, number>();
+    for (const item of items) {
+        const secondary = parseSecondaryCategoriesJson(item.secondaryErrorCategories);
+        secondaryCache.set(item.id, secondary);
+        const mastery = WEAKNESS_CONFIG.masteryFactor[item.masteryLevel] ?? 1.0;
+        scoreCache.set(
+            item.id,
+            categoryWeight(item.errorCategory, item.secondaryErrorCategories) * mastery * recencyFactor(item.updatedAt, now)
+        );
+    }
+
     // 逐 tag 计算
     const ranking: TagWeakness[] = [];
     const heatmaps = new Map<string, number[]>(); // tagId → 各错因加权量
@@ -115,18 +128,12 @@ export function computeWeaknessReport(
         let correct = 0;
 
         for (const item of tagItems) {
-            const mastery = WEAKNESS_CONFIG.masteryFactor[item.masteryLevel] ?? 1.0;
-            const itemScore = categoryWeight(item.errorCategory, item.secondaryErrorCategories) * mastery * recencyFactor(item.updatedAt, now);
+            const itemScore = scoreCache.get(item.id) ?? 0;
 
             // 热力图贡献（不加掌握度/时间因子，展示原始错因分布）
             const primaryIdx = item.errorCategory ? categoryIndex.get(item.errorCategory) : undefined;
             if (primaryIdx !== undefined) cells[primaryIdx] += 1.0;
-            let secondary: string[] = [];
-            try {
-                const parsed = item.secondaryErrorCategories ? JSON.parse(item.secondaryErrorCategories) : [];
-                if (Array.isArray(parsed)) secondary = parsed;
-            } catch { /* ignore */ }
-            for (const code of secondary as string[]) {
+            for (const code of secondaryCache.get(item.id) ?? []) {
                 const idx = categoryIndex.get(code);
                 if (idx !== undefined) cells[idx] += WEAKNESS_CONFIG.secondaryWeightRatio;
             }

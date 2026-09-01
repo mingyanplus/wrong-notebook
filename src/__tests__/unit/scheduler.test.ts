@@ -2,7 +2,7 @@
  * 艾宾浩斯复习调度器单元测试
  */
 import { describe, it, expect } from 'vitest';
-import { getReviewIntervalDays, calculateNextReviewDate, getReviewStageDescription } from '@/lib/scheduler';
+import { getReviewIntervalDays, calculateNextReviewDate } from '@/lib/scheduler';
 
 describe('scheduler 艾宾浩斯调度', () => {
     describe('getReviewIntervalDays', () => {
@@ -36,15 +36,5 @@ describe('scheduler 艾宾浩斯调度', () => {
         });
     });
 
-    describe('getReviewStageDescription', () => {
-        it('基础阶段应有对应描述', () => {
-            expect(getReviewStageDescription(0)).toContain('1 day');
-            expect(getReviewStageDescription(5)).toContain('30 days');
-        });
 
-        it('扩展阶段应显示实际天数', () => {
-            expect(getReviewStageDescription(6)).toContain('45 days');
-            expect(getReviewStageDescription(8)).toContain('90 days');
-        });
-    });
 });

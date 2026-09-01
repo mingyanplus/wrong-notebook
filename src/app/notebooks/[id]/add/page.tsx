@@ -9,6 +9,7 @@ import { ImageCropper } from "@/components/image-cropper";
 import { ParsedQuestion } from "@/lib/ai";
 import { apiClient } from "@/lib/api-client";
 import { parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from "@/lib/error-categories";
+import type { ReanswerQuestionResult } from "@/lib/ai/types";
 import { AnalyzeResponse, Notebook, AppConfig } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -245,17 +246,7 @@ export default function AddErrorPage() {
         try {
             setAnalysisStep('analyzing');
 
-            const result = await apiClient.post<{
-                answerText: string;
-                analysis: string;
-                knowledgePoints: string[];
-                wrongAnswerText: string;
-                mistakeAnalysis: string;
-                mistakeStatus: string;
-                errorCategory?: string;
-                secondaryErrorCategories?: string[];
-                questionType?: string;
-            }>("/api/reanswer", {
+            const result = await apiClient.post<ReanswerQuestionResult>("/api/reanswer", {
                 questionText,
                 language,
                 subject: notebook?.name || undefined,

@@ -38,9 +38,6 @@ export async function GET(req: Request) {
                     select: {
                         id: true,
                         questionText: true,
-                        subjectId: true,
-                        masteryLevel: true,
-                        originalImageUrl: true,
                     },
                 },
             },

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
 import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
-import { safeParseParsedQuestion } from './schema';
+import { safeParseParsedQuestion, parseBackfillResponse } from './schema';
 import { getAppConfig } from '../config';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
@@ -416,14 +416,7 @@ export class GeminiProvider implements AIService {
         const text = response.text || '';
         if (!text) throw new Error("Empty response from AI");
 
-        const knowledgePointsRaw = this.extractTag(text, "knowledge_points") || "";
-        const errorCategory = parseErrorCategoryCode(this.extractTag(text, "error_category"));
-        return {
-            knowledgePoints: knowledgePointsRaw.split(/[,，\n]/).map((k) => k.trim()).filter((k) => k.length > 0).slice(0, 5),
-            questionType: parseQuestionTypeCode(this.extractTag(text, "question_type")),
-            errorCategory,
-            secondaryErrorCategories: parseSecondaryCategories(this.extractTag(text, "secondary_error_categories"), errorCategory),
-        };
+        return parseBackfillResponse(text, (t, tag) => this.extractTag(t, tag));
     }
 
     private handleError(error: unknown) {

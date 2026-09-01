@@ -7,6 +7,7 @@ import { createLogger } from "@/lib/logger";
 import { getAIService } from "@/lib/ai";
 import { QUESTION_TYPES, getErrorCategoryLabel } from "@/lib/error-categories";
 import { categoryWeight, recencyFactor } from "@/lib/weakness";
+import { WEAKNESS_CONFIG } from "@/lib/weakness-config";
 import type { Prisma } from "@prisma/client";
 
 type ItemWithRels = Prisma.ErrorItemGetPayload<{ include: { tags: true; subject: true } }>;
@@ -59,30 +60,34 @@ export async function POST(req: Request) {
                 include: { tags: true, subject: true },
             });
         } else {
-            const pool = await prisma.errorItem.findMany({
+            // 先轻量取打分所需字段，选出 top N 后再取全量关系（避免整库加载）
+            const poolLite = await prisma.errorItem.findMany({
                 where: {
                     userId,
                     ...(body.subjectId ? { subjectId: body.subjectId } : {}),
                     questionText: { not: null },
                 },
-                include: { tags: true, subject: true },
+                select: { id: true, errorCategory: true, secondaryErrorCategories: true, masteryLevel: true, updatedAt: true },
             });
-            // 轻量薄弱度：categoryWeight × masteryFactor × recencyFactor；未掌握优先
-            const masteryFactor = (lv: number) => (lv >= 2 ? 0.2 : lv === 1 ? 0.6 : 1.0);
-            items = pool
+            // 轻量薄弱度：categoryWeight × masteryFactor × recencyFactor；未掌握优先（因子与统计模型同源）
+            const topIds = poolLite
                 .map((i) => ({
-                    item: i,
+                    id: i.id,
                     score: categoryWeight(i.errorCategory, i.secondaryErrorCategories)
-                        * masteryFactor(i.masteryLevel)
+                        * (WEAKNESS_CONFIG.masteryFactor[i.masteryLevel] ?? 1.0)
                         * recencyFactor(i.updatedAt),
                 }))
                 .sort((a, b) => b.score - a.score)
                 .slice(0, count)
-                .map((x) => x.item);
+                .map((x) => x.id);
+            items = await prisma.errorItem.findMany({
+                where: { id: { in: topIds }, userId },
+                include: { tags: true, subject: true },
+            });
         }
 
         if (items.length === 0) {
-            return badRequest("没有符合条件的错题可组卷");
+            return badRequest("No eligible error items to build a paper");
         }
 
         // ── 分配原题/变式 ──────────────────────────────────
@@ -153,8 +158,7 @@ export async function POST(req: Request) {
             }
         }
 
-        const variantTargets = Array.from(needVariant);
-        const queue = [...variantTargets];
+        const queue = Array.from(needVariant);
         await Promise.all(
             Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
                 while (queue.length > 0) {
@@ -204,8 +208,8 @@ export async function POST(req: Request) {
             }
         }
 
-        // 大题顺序：选择 → 填空 → 判断 → 解答
-        const sectionOrder = ["choice", "fill", "judge", "solve"];
+        // 大题顺序由 QUESTION_TYPES 定义派生（选择 → 填空 → 判断 → 解答）
+        const sectionOrder = QUESTION_TYPES.map((t) => t.code as string);
         drafts.sort((a, b) => sectionOrder.indexOf(a.section) - sectionOrder.indexOf(b.section));
 
         const totalScore = drafts.reduce((sum, d) => sum + d.score, 0);

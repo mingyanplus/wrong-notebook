@@ -6,6 +6,7 @@ import { unauthorized, internalError } from "@/lib/api-errors";
 import { createLogger } from "@/lib/logger";
 import { getAIService } from "@/lib/ai";
 import { findParentTagIdForGrade } from "@/lib/tag-recognition";
+import { inferSubjectFromName } from "@/lib/knowledge-tags";
 
 const logger = createLogger('api:error-items:backfill');
 
@@ -84,19 +85,19 @@ export async function POST(req: Request) {
 
                 // 标签补全（仅当当前无标签）
                 if (item.tags.length === 0 && meta.knowledgePoints.length > 0) {
-                    const subjectKey = item.subject?.name?.toLowerCase().includes('math') ||
-                        item.subject?.name?.includes('数学') ? 'math'
-                        : item.subject?.name?.toLowerCase().includes('english') ||
-                            item.subject?.name?.includes('英语') ? 'english'
-                        : 'other';
+                    const subjectKey = inferSubjectFromName(item.subject?.name ?? null) ?? 'other';
+
+                    // 批量查已有标签；父级标签对同一题是常量，只查一次
+                    const existingTags = await prisma.knowledgeTag.findMany({
+                        where: { name: { in: meta.knowledgePoints }, OR: [{ isSystem: true }, { userId }] },
+                    });
+                    const existingByName = new Map(existingTags.map((tg) => [tg.name, tg]));
+                    const parentId = await findParentTagIdForGrade(item.gradeSemester, subjectKey);
 
                     const tagIds: string[] = [];
                     for (const tagName of meta.knowledgePoints) {
-                        let tag = await prisma.knowledgeTag.findFirst({
-                            where: { name: tagName, OR: [{ isSystem: true }, { userId }] },
-                        });
+                        let tag = existingByName.get(tagName);
                         if (!tag) {
-                            const parentId = await findParentTagIdForGrade(item.gradeSemester, subjectKey);
                             tag = await prisma.knowledgeTag.create({
                                 data: { name: tagName, subject: subjectKey, parentId: parentId ?? undefined, isSystem: false, userId },
                             });

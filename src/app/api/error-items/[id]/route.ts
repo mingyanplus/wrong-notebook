@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { getServerSession } from "next-auth";
 import { unauthorized, forbidden, notFound, internalError } from "@/lib/api-errors";
+import { serializeSecondaryCategories } from "@/lib/error-categories";
 import { createLogger } from "@/lib/logger";
 import { findParentTagIdForGrade } from "@/lib/tag-recognition";
 import { normalizeMistakeStatusForSave } from "@/lib/mistake-status";
@@ -117,11 +118,7 @@ export async function PUT(
         }
         if (geogebraCommands !== undefined) updateData.geogebraCommands = geogebraCommands || null;
         if (errorCategory !== undefined) updateData.errorCategory = errorCategory || null;
-        if (secondaryErrorCategories !== undefined) {
-            updateData.secondaryErrorCategories = Array.isArray(secondaryErrorCategories)
-                ? JSON.stringify(secondaryErrorCategories.slice(0, 2))
-                : null;
-        }
+        if (secondaryErrorCategories !== undefined) updateData.secondaryErrorCategories = serializeSecondaryCategories(secondaryErrorCategories);
         if (questionType !== undefined) updateData.questionType = questionType || null;
         if (stuckPoint !== undefined) updateData.stuckPoint = stuckPoint || null;
         if (source !== undefined) updateData.source = source || null;

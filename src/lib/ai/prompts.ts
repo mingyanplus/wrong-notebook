@@ -2,6 +2,7 @@
  * Shared AI prompt templates
  * This module provides centralized prompt management
  */
+import { buildErrorCategoryInstruction } from '../error-categories';
 
 /**
  * 将 gradeSemester 字符串转换为年级数字（用于标签过滤）
@@ -151,10 +152,7 @@ export const DEFAULT_ANALYZE_TEMPLATE = `【角色与核心任务 (ROLE AND CORE
 </question_type>
 
 <error_category>
-分析学生的主要错误原因，填写以下 code 之一：
-concept（概念不清：定义/定理/性质理解错误）、formula（公式记错：公式本身回忆错误）、calculation（计算失误：思路对但算错）、misread（审题偏差：漏条件、理解错题意）、method（方法选择错误：用错方法或绕远路）、stuck（思路卡壳：无从下手、卡在关键步骤）、expression（表述不规范：会做但过程/格式丢分）、careless（粗心/时间不足：抄错数、看错、没做完）。
-英语题可用：vocab（词义混淆）。语文选择题可用：trap（设错点误判）。历史/地理/政治可用：recall（记忆性错误）。
-如果图片中没有学生作答、无法判断错误原因，填写 unknown。
+分析学生的主要错误原因，{{error_category_instruction}}
 </error_category>
 
 <secondary_error_categories>
@@ -219,7 +217,7 @@ concept（概念不清：定义/定理/性质理解错误）、formula（公式�
 - 每题最多 5 个标签。
 
 【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
-1. **格式严格**：必须严格包含上述 12 个 XML 标签，除此之外不要输出任何其他“开场白”或“结束语”。
+1. **格式严格**：必须严格包含上述全部 XML 标签，除此之外不要输出任何其他“开场白”或“结束语”。
 2. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。
 3. **内容完整**：如果包含子问题，请在 question_text 中完整列出。
 4. **禁止图片**：严禁包含任何图片链接或 markdown 图片语法。
@@ -421,6 +419,7 @@ ${englishTagsString}`;
   return replaceVariables(template, {
     language_instruction: langInstruction,
     knowledge_points_list: tagsSection,
+    error_category_instruction: buildErrorCategoryInstruction(subject),
     grade_instruction: generateGradeInstruction(gradeSemester),
     provider_hints: options?.providerHints || ''
   }).trim();
@@ -742,7 +741,7 @@ export function generateBackfillPrompt(params: BackfillPromptParams): string {
 
   const hasWrong = !!(params.wrongAnswerText && params.wrongAnswerText.trim());
   const errorCategoryInstruction = hasWrong
-    ? `根据学生的错误作答分析主要错因，填写以下 code 之一：concept（概念不清）、formula（公式记错）、calculation（计算失误）、misread（审题偏差）、method（方法选择错误）、stuck（思路卡壳）、expression（表述不规范）、careless（粗心/时间不足）、vocab（词义混淆，英语）、trap（设错点误判，语文选择题）、recall（记忆性错误，史地政）。`
+    ? `根据学生的错误作答分析主要错因，${buildErrorCategoryInstruction(params.subject)}`
     : "本题没有学生错误作答记录，直接填写 unknown。";
 
   return DEFAULT_BACKFILL_PROMPT.replace('{{question_text}}', params.questionText)

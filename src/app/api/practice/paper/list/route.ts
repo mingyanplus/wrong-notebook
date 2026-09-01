@@ -19,7 +19,7 @@ export async function GET() {
         const papers = await prisma.practicePaper.findMany({
             where: { userId: session.user.id },
             orderBy: { createdAt: "desc" },
-            include: { questions: { select: { id: true, isCorrect: true } } },
+            include: { questions: { select: { isCorrect: true } } },
         });
 
         return NextResponse.json(
@@ -31,7 +31,7 @@ export async function GET() {
                 totalScore: p.totalScore,
                 createdAt: p.createdAt,
                 questionCount: p.questions.length,
-                gradedCount: p.questions.filter((q) => q.isCorrect !== null && q.isCorrect !== undefined).length,
+                gradedCount: p.questions.filter((q) => q.isCorrect !== null).length,
             }))
         );
     } catch (error) {

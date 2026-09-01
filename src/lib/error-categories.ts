@@ -70,11 +70,12 @@ export function getCategoriesForSubject(subjectName?: string | null): ErrorCateg
 
 export type QuestionTypeCode = "choice" | "fill" | "solve" | "judge";
 
+// 顺序即组卷大题顺序：选择 → 填空 → 判断 → 解答
 export const QUESTION_TYPES: Array<{ code: QuestionTypeCode; label: string; defaultScore: number }> = [
     { code: "choice", label: "选择题", defaultScore: 3 },
     { code: "fill", label: "填空题", defaultScore: 3 },
-    { code: "solve", label: "解答题", defaultScore: 10 },
     { code: "judge", label: "判断题", defaultScore: 3 },
+    { code: "solve", label: "解答题", defaultScore: 10 },
 ];
 
 export function getQuestionTypeLabel(code: string | null | undefined): string {
@@ -105,4 +106,45 @@ export function parseSecondaryCategories(raw: string | null | undefined, primary
 export function parseQuestionTypeCode(raw: string | null | undefined): QuestionTypeCode {
     if (raw === "choice" || raw === "fill" || raw === "judge") return raw;
     return "solve";
+}
+
+// ── secondaryErrorCategories 的 JSON 序列化/反序列化（单一实现，各 API 路由复用）──
+
+/** 序列化次错因为 JSON 字符串（过滤非字符串、截断到最多 2 个）；非数组输入返回 null */
+export function serializeSecondaryCategories(codes: unknown): string | null {
+    if (!Array.isArray(codes)) return null;
+    return JSON.stringify(codes.filter((c): c is string => typeof c === "string").slice(0, 2));
+}
+
+/** 容错解析 secondaryErrorCategories JSON 字符串为数组（非法输入返回空数组） */
+export function parseSecondaryCategoriesJson(json: string | null | undefined): string[] {
+    if (!json) return [];
+    try {
+        const parsed = JSON.parse(json);
+        return Array.isArray(parsed) ? parsed.filter((c): c is string => typeof c === "string") : [];
+    } catch {
+        return [];
+    }
+}
+
+// ── AI 提示词用的错因目录拼装（由 ERROR_CATEGORIES 派生，避免提示词手抄目录）──
+
+const SUBJECT_LABELS: Record<string, string> = { english: "英语", chinese: "语文", history: "历史", geography: "地理", politics: "政治" };
+
+/** 拼装错因 code 目录指令串（核心 + 可选学科扩展），供 analyze/backfill 提示词注入 */
+export function buildErrorCategoryInstruction(subject?: string | null): string {
+    const categories = getCategoriesForSubject(subject);
+    const subjectExtras = ERROR_CATEGORIES.filter((c) => c.subjects !== null && !categories.includes(c));
+    const lines = [
+        `填写以下 code 之一：${categories.map((c) => `${c.code}（${c.label}：${c.criteria}）`).join("、")}。`,
+    ];
+    if (subjectExtras.length > 0) {
+        lines.push(
+            subjectExtras
+                .map((c) => `${(c.subjects ?? []).map((s) => SUBJECT_LABELS[s] ?? s).join("/")}题可用：${c.code}（${c.label}）`)
+                .join("。") + "。"
+        );
+    }
+    lines.push("如果没有学生作答、无法判断错误原因，填写 unknown。");
+    return lines.join("\n");
 }

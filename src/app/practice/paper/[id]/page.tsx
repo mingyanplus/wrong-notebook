@@ -8,7 +8,7 @@ import { Loader2, Printer, ClipboardCheck, Trash2, Check, X, RotateCcw } from "l
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiClient } from "@/lib/api-client";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
-import { getQuestionTypeLabel, getErrorCategoryLabel } from "@/lib/error-categories";
+import { QUESTION_TYPES } from "@/lib/error-categories";
 
 interface PaperQuestion {
     id: string;
@@ -37,12 +37,11 @@ interface PaperDetail {
     subject?: { id: string; name: string } | null;
 }
 
-const SECTION_TITLES: Record<string, string> = {
-    choice: "一、选择题",
-    fill: "二、填空题",
-    judge: "三、判断题",
-    solve: "四、解答题",
-};
+const CN_NUMERALS = ["一", "二", "三", "四", "五", "六"];
+// 大题标题由 QUESTION_TYPES 顺序派生（选择 → 填空 → 判断 → 解答），与组卷排序单一来源
+const SECTION_TITLES: Record<string, string> = Object.fromEntries(
+    QUESTION_TYPES.map((t, i) => [t.code, `${CN_NUMERALS[i]}、${t.label}`])
+);
 
 export default function PaperDetailPage() {
     const params = useParams();
@@ -85,7 +84,7 @@ export default function PaperDetailPage() {
         if (!paper) return;
         const inputs: Record<string, boolean> = {};
         paper.questions.forEach((q) => {
-            if (q.isCorrect !== null && q.isCorrect !== undefined) inputs[q.id] = q.isCorrect;
+            if (q.isCorrect !== null) inputs[q.id] = q.isCorrect;
         });
         setGradeInputs(inputs);
         setGrading(true);
@@ -221,10 +220,9 @@ export default function PaperDetailPage() {
                                                 >
                                                     ✗ {t.paper?.wrong || "错"}
                                                 </button>
-                                                {q.isCorrect !== null && q.isCorrect !== undefined && !grading && null}
                                             </div>
                                         )}
-                                        {!grading && q.isCorrect !== null && q.isCorrect !== undefined && (
+                                        {!grading && q.isCorrect !== null && (
                                             <span className={`inline-block mt-2 rounded px-2 py-0.5 text-xs ${q.isCorrect ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
                                                 {q.isCorrect ? "✓" : "✗"}
                                             </span>
@@ -237,10 +235,14 @@ export default function PaperDetailPage() {
                 ))}
             </div>
 
-            {/* 答案区：屏幕上折叠展示，打印强制新起一页（定案） */}
-            <div id="answer-section" className="mt-10 print:hidden">
-                <Card>
-                    <CardHeader><CardTitle>{t.paper?.answersSection || "参考答案与解析"}</CardTitle></CardHeader>
+            {/* 答案区：屏幕上折叠展示；打印时强制新起一页（print 函数控制显隐） */}
+            <div
+                id="answer-section"
+                className="mt-10 print:block print:[break-before:page]"
+                style={{ pageBreakBefore: "always" }}
+            >
+                <Card className="print:border-0 print:shadow-none">
+                    <CardHeader className="print:hidden"><CardTitle>{t.paper?.answersSection || "参考答案与解析"}</CardTitle></CardHeader>
                     <CardContent className="space-y-4">
                         {paper.questions.map((q) => (
                             <div key={q.id} className="border-b pb-3 last:border-0">
@@ -253,7 +255,7 @@ export default function PaperDetailPage() {
                                     ) : null}
                                 </div>
                                 <div className="prose prose-sm max-w-none"><MarkdownRenderer content={q.answerText} /></div>
-                                <details className="mt-1">
+                                <details className="mt-1 print:open">
                                     <summary className="text-xs text-muted-foreground cursor-pointer">{t.paper?.showAnalysis || "查看解析"}</summary>
                                     <div className="prose prose-sm max-w-none mt-1"><MarkdownRenderer content={q.analysis} /></div>
                                 </details>
@@ -263,17 +265,6 @@ export default function PaperDetailPage() {
                 </Card>
             </div>
 
-            {/* 打印版答案区：强制分页 */}
-            <div className="hidden print:block" style={{ pageBreakBefore: "always" }}>
-                <h1 className="text-lg font-bold mb-4">参考答案与解析</h1>
-                {paper.questions.map((q) => (
-                    <div key={q.id} className="mb-4 print:break-inside-avoid">
-                        <div className="text-sm font-medium">{q.order}.</div>
-                        <div className="prose prose-sm max-w-none"><MarkdownRenderer content={q.answerText} /></div>
-                        <div className="prose prose-sm max-w-none text-sm text-gray-600"><MarkdownRenderer content={q.analysis} /></div>
-                    </div>
-                ))}
-            </div>
         </div>
     );
 }

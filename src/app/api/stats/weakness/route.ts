@@ -38,7 +38,7 @@ export async function GET(req: Request) {
                 masteryLevel: true,
                 updatedAt: true,
                 gradeSemester: true,
-                subject: { select: { name: true } },
+                subjectId: true,
                 tags: { select: { id: true, name: true } },
             },
         });
@@ -64,15 +64,19 @@ export async function GET(req: Request) {
         );
 
         // 可选筛选值（来自全量数据，不受当前筛选影响）
-        const allItems = await prisma.errorItem.findMany({
+        const unfiltered = !subject && (!semester || semester === "all");
+        const semestersFrom = unfiltered ? items : null;
+        const liteItems = semestersFrom ?? await prisma.errorItem.findMany({
             where: { userId },
-            select: { subject: { select: { name: true } }, gradeSemester: true },
+            select: { subjectId: true, gradeSemester: true },
         });
-        const availableSubjects = Array.from(
-            new Set(allItems.map((i) => i.subject?.name).filter((n): n is string => !!n))
-        );
+        const subjectIds = Array.from(new Set(liteItems.map((i) => i.subjectId).filter((v): v is string => !!v)));
+        const subjectRows = subjectIds.length
+            ? await prisma.subject.findMany({ where: { id: { in: subjectIds } }, select: { name: true } })
+            : [];
+        const availableSubjects = subjectRows.map((x) => x.name);
         const availableSemesters = Array.from(
-            new Set(allItems.map((i) => i.gradeSemester).filter((s): s is string => !!s))
+            new Set(liteItems.map((i) => i.gradeSemester).filter((s): s is string => !!s))
         );
 
         return NextResponse.json({

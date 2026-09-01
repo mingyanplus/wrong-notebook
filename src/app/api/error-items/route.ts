@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { getServerSession } from "next-auth";
 import { calculateGrade } from "@/lib/grade-calculator";
 import { unauthorized, internalError } from "@/lib/api-errors";
+import { serializeSecondaryCategories } from "@/lib/error-categories";
 import { createLogger } from "@/lib/logger";
 import { findParentTagIdForGrade } from "@/lib/tag-recognition";
 import { inferSubjectFromName } from "@/lib/knowledge-tags";
@@ -180,9 +181,7 @@ export async function POST(req: Request) {
                     paperLevel: paperLevel,
                     geogebraCommands: geogebraCommands || null,
                     errorCategory: errorCategory || null,
-                    secondaryErrorCategories: Array.isArray(secondaryErrorCategories)
-                        ? JSON.stringify(secondaryErrorCategories.slice(0, 2))
-                        : null,
+                    secondaryErrorCategories: serializeSecondaryCategories(secondaryErrorCategories),
                     questionType: questionType || null,
                     source: source || null,
                     masteryLevel: 0,

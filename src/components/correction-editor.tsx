@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { ParsedQuestion } from "@/lib/ai";
-import { QUESTION_TYPES, getCategoriesForSubject } from "@/lib/error-categories";
 import { calculateGrade } from "@/lib/grade-calculator";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,6 +13,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { frontendLogger } from "@/lib/frontend-logger";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { TagInput } from "@/components/tag-input";
+import { ErrorCategoryPicker } from "@/components/error-category-picker";
 import { NotebookSelector } from "@/components/notebook-selector";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiClient } from "@/lib/api-client";
@@ -58,12 +58,6 @@ export function CorrectionEditor({ initialData, onSave, onCancel, imagePreview, 
         gradeSemester: "",
         paperLevel: "a"
     });
-    // 按学科过滤可用错因列表
-    const availableCategories = useMemo(
-        () => getCategoriesForSubject(data.subject),
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        [data.subject]
-    );
     const { t, language } = useLanguage();
     const [isReanswering, setIsReanswering] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -385,78 +379,18 @@ export function CorrectionEditor({ initialData, onSave, onCancel, imagePreview, 
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                <div className="space-y-2">
-                                    <Label>{t.editor.questionType || "题型"}</Label>
-                                    <Select
-                                        value={data.questionType || "solve"}
-                                        onValueChange={(val) => setData({ ...data, questionType: val as ParsedQuestion["questionType"] })}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {QUESTION_TYPES.map((qt) => (
-                                                <SelectItem key={qt.code} value={qt.code}>{qt.label}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>{t.editor.errorCategory || "主要错因"}</Label>
-                                    <Select
-                                        value={data.errorCategory || "unknown"}
-                                        onValueChange={(val) => setData({
-                                            ...data,
-                                            errorCategory: val as ParsedQuestion["errorCategory"],
-                                            // 主错因变化时，从次错因中移除同项
-                                            secondaryErrorCategories: (data.secondaryErrorCategories || []).filter((c) => c !== val),
-                                        })}
-                                    >
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="unknown">{t.editor.errorCategoryUnknown || "未判定"}</SelectItem>
-                                            {availableCategories.map((c) => (
-                                                <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-                            {data.errorCategory && data.errorCategory !== "unknown" && (
-                                <div className="space-y-2">
-                                    <Label>{t.editor.secondaryErrorCategories || "次要错因（最多 2 个）"}</Label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {availableCategories
-                                            .filter((c) => c.code !== data.errorCategory)
-                                            .map((c) => {
-                                                const selected = (data.secondaryErrorCategories || []).includes(c.code);
-                                                return (
-                                                    <button
-                                                        key={c.code}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const current = data.secondaryErrorCategories || [];
-                                                            const next = selected
-                                                                ? current.filter((x) => x !== c.code)
-                                                                : [...current, c.code].slice(0, 2);
-                                                            setData({ ...data, secondaryErrorCategories: next });
-                                                        }}
-                                                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                                                            selected
-                                                                ? "border-primary bg-primary text-primary-foreground"
-                                                                : "border-input bg-background hover:bg-accent"
-                                                        }`}
-                                                    >
-                                                        {c.label}
-                                                    </button>
-                                                );
-                                            })}
-                                    </div>
-                                </div>
-                            )}
+                            <ErrorCategoryPicker
+                                subjectName={data.subject}
+                                errorCategory={data.errorCategory || "unknown"}
+                                secondaryErrorCategories={data.secondaryErrorCategories || []}
+                                questionType={data.questionType || "solve"}
+                                onChange={(next) => setData({
+                                    ...data,
+                                    errorCategory: next.errorCategory as ParsedQuestion["errorCategory"],
+                                    secondaryErrorCategories: next.secondaryErrorCategories as ParsedQuestion["secondaryErrorCategories"],
+                                    questionType: next.questionType as ParsedQuestion["questionType"],
+                                })}
+                            />
                             <div className="space-y-2">
                                 <Label>{t.editor.wrongAnswerText || "错误解答原文"}</Label>
                                 <Textarea

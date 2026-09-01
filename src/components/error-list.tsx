@@ -85,7 +85,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
             })
             .catch(() => { /* 静默失败 */ });
         return () => { cancelled = true; };
-    }, [subjectId, items.length]);
+    }, [subjectId]);
 
     const handleExportPrint = () => {
         const params = new URLSearchParams();

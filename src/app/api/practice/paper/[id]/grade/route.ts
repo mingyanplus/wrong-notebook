@@ -4,13 +4,13 @@ import { authOptions } from "@/lib/auth";
 import { getServerSession } from "next-auth";
 import { unauthorized, internalError, notFound, forbidden, badRequest } from "@/lib/api-errors";
 import { createLogger } from "@/lib/logger";
-import { calculateNextReviewDate } from "@/lib/scheduler";
+import { advanceReviewSchedule } from "@/lib/scheduler";
 
 const logger = createLogger('api:practice:paper:grade');
 
 /**
  * 录成绩（纸质卷闭环断点）：逐题对/错 → 回写试卷题目结果 +
- * 掌握度升降 + PracticeRecord + 艾宾浩斯复习计划推进
+ * 掌握度升降 + PracticeRecord + 艾宾浩斯复习计划推进（事务内执行）
  */
 export async function POST(
     req: Request,
@@ -35,7 +35,6 @@ export async function POST(
             where: { id },
             include: { questions: true },
         });
-        const subject = paper?.subjectId ? await prisma.subject.findUnique({ where: { id: paper.subjectId }, select: { name: true } }) : null;
 
         if (!paper) {
             return notFound("Paper not found");
@@ -45,75 +44,56 @@ export async function POST(
         }
 
         const questionMap = new Map(paper.questions.map((q) => [q.id, q]));
-        let updatedItems = 0;
+        const validResults = results
+            .map((r: { questionId: string; isCorrect: boolean }) => {
+                const q = questionMap.get(r.questionId);
+                return q ? { q, isCorrect: !!r.isCorrect } : null;
+            })
+            .filter((x): x is { q: NonNullable<ReturnType<typeof questionMap.get>>; isCorrect: boolean } => x !== null);
 
-        for (const r of results) {
-            const q = questionMap.get(r.questionId);
-            if (!q) continue;
+        // 按对/错分组的批量题目结果回写
+        const correctQIds = validResults.filter((r) => r.isCorrect).map((r) => r.q.id);
+        const wrongQIds = validResults.filter((r) => !r.isCorrect).map((r) => r.q.id);
 
-            await prisma.paperQuestion.update({
-                where: { id: q.id },
-                data: { isCorrect: !!r.isCorrect },
-            });
+        // 关联的原错题（去重，一卷内同一错题可能对应多道变式题——以最后一题结果为准）
+        const lastResultByItem = new Map<string, boolean>();
+        for (const r of validResults) {
+            if (r.q.sourceErrorItemId) lastResultByItem.set(r.q.sourceErrorItemId, r.isCorrect);
+        }
+        const sourceIds = Array.from(lastResultByItem.keys());
 
-            // 回写原错题：掌握度 + 练习记录 + 复习计划
-            if (q.sourceErrorItemId) {
-                const activeSchedule = await prisma.reviewSchedule.findFirst({
-                    where: { errorItemId: q.sourceErrorItemId, completedAt: null },
-                    orderBy: { scheduledFor: "asc" },
-                });
-                if (activeSchedule) {
-                    await prisma.reviewSchedule.update({
-                        where: { id: activeSchedule.id },
-                        data: { completedAt: new Date(), isCorrect: !!r.isCorrect },
-                    });
-                }
+        const subject = paper.subjectId
+            ? await prisma.subject.findUnique({ where: { id: paper.subjectId }, select: { name: true } })
+            : null;
 
-                const currentCount = activeSchedule?.reviewCount ?? 0;
-                const nextCount = r.isCorrect ? currentCount + 1 : 0;
+        await prisma.$transaction(async (tx) => {
+            if (correctQIds.length) {
+                await tx.paperQuestion.updateMany({ where: { id: { in: correctQIds } }, data: { isCorrect: true } });
+            }
+            if (wrongQIds.length) {
+                await tx.paperQuestion.updateMany({ where: { id: { in: wrongQIds } }, data: { isCorrect: false } });
+            }
 
-                const item = await prisma.errorItem.findUnique({
-                    where: { id: q.sourceErrorItemId },
-                    select: { masteryLevel: true },
-                });
-                if (item) {
-                    const nextMastery = r.isCorrect
-                        ? Math.min((item.masteryLevel ?? 0) + 1, 2)
-                        : 0;
-                    await prisma.errorItem.update({
-                        where: { id: q.sourceErrorItemId },
-                        data: { masteryLevel: nextMastery },
-                    });
-                }
+            for (const [itemId, isCorrect] of lastResultByItem) {
+                await advanceReviewSchedule(itemId, isCorrect, tx);
+            }
 
-                await prisma.reviewSchedule.create({
-                    data: {
-                        errorItemId: q.sourceErrorItemId,
-                        scheduledFor: calculateNextReviewDate(nextCount),
-                        reviewCount: nextCount,
-                    },
-                });
-
-                await prisma.practiceRecord.create({
-                    data: {
+            if (sourceIds.length) {
+                await tx.practiceRecord.createMany({
+                    data: sourceIds.map((itemId) => ({
                         userId,
                         subject: subject?.name || null,
-                        isCorrect: !!r.isCorrect,
-                    },
+                        isCorrect: lastResultByItem.get(itemId) ?? false,
+                    })),
                 });
-
-                updatedItems += 1;
             }
-        }
 
-        await prisma.practicePaper.update({
-            where: { id },
-            data: { status: "graded" },
+            await tx.practicePaper.update({ where: { id }, data: { status: "graded" } });
         });
 
-        logger.info({ paperId: id, resultsCount: results.length, updatedItems }, 'Paper graded');
+        logger.info({ paperId: id, resultsCount: validResults.length, updatedItems: sourceIds.length }, 'Paper graded');
 
-        return NextResponse.json({ ok: true, updatedItems });
+        return NextResponse.json({ ok: true, updatedItems: sourceIds.length });
     } catch (error) {
         logger.error({ error }, 'Error grading paper');
         return internalError("Failed to grade paper");
