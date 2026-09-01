@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +24,7 @@ interface PaperListItem {
 
 type PaperMode = "original" | "variant" | "mixed";
 
-export default function PaperWizardPage() {
+function PaperWizardContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { t } = useLanguage();
@@ -220,5 +220,17 @@ export default function PaperWizardPage() {
                 </CardContent>
             </Card>
         </div>
+    );
+}
+
+export default function PaperWizardPage() {
+    return (
+        <Suspense fallback={
+            <div className="flex justify-center p-8">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+        }>
+            <PaperWizardContent />
+        </Suspense>
     );
 }

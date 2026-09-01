@@ -10,6 +10,7 @@ import { ParsedQuestion } from "@/lib/ai";
 import { UserWelcome } from "@/components/user-welcome";
 import { apiClient } from "@/lib/api-client";
 import { parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from "@/lib/error-categories";
+import type { ReanswerQuestionResult } from "@/lib/ai/types";
 import { AnalyzeResponse, Notebook, AppConfig } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/LanguageContext";
