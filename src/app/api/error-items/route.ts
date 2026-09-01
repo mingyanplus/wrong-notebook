@@ -8,6 +8,7 @@ import { createLogger } from "@/lib/logger";
 import { findParentTagIdForGrade } from "@/lib/tag-recognition";
 import { inferSubjectFromName } from "@/lib/knowledge-tags";
 import { normalizeMistakeStatusForSave } from "@/lib/mistake-status";
+import { calculateNextReviewDate } from "@/lib/scheduler";
 
 const logger = createLogger('api:error-items');
 
@@ -185,6 +186,16 @@ export async function POST(req: Request) {
             });
 
             logger.info({ errorItemId: errorItem.id, tagsCount: errorItem.tags?.length || 0 }, 'ErrorItem created successfully');
+
+            // 创建首条艾宾浩斯复习计划（1 天后）
+            await prisma.reviewSchedule.create({
+                data: {
+                    errorItemId: errorItem.id,
+                    scheduledFor: calculateNextReviewDate(0),
+                    reviewCount: 0,
+                },
+            });
+
             return NextResponse.json(errorItem, { status: 201 });
         } catch (dbError) {
             logger.error({

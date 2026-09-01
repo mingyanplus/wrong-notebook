@@ -23,6 +23,12 @@ const mocks = vi.hoisted(() => ({
         findFirst: vi.fn(),
         create: vi.fn(),
     },
+    mockPrismaReviewSchedule: {
+        create: vi.fn().mockResolvedValue({}),
+        findFirst: vi.fn(),
+        update: vi.fn(),
+        findMany: vi.fn(),
+    },
     mockPrismaSubject: {
         findUnique: vi.fn(),
     },
@@ -41,6 +47,7 @@ vi.mock('@/lib/prisma', () => ({
         user: mocks.mockPrismaUser,
         errorItem: mocks.mockPrismaErrorItem,
         knowledgeTag: mocks.mockPrismaKnowledgeTag,
+        reviewSchedule: mocks.mockPrismaReviewSchedule,
         subject: mocks.mockPrismaSubject,
     },
 }));

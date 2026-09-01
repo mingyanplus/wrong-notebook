@@ -8,8 +8,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
     mockPrismaErrorItem: {
         findUnique: vi.fn(),
+        update: vi.fn(),
     },
     mockPrismaPracticeRecord: {
+        create: vi.fn(),
+    },
+    mockPrismaReviewSchedule: {
+        findFirst: vi.fn(),
+        update: vi.fn(),
         create: vi.fn(),
     },
     mockAIService: {
@@ -30,6 +36,7 @@ vi.mock('@/lib/prisma', () => ({
     prisma: {
         errorItem: mocks.mockPrismaErrorItem,
         practiceRecord: mocks.mockPrismaPracticeRecord,
+        reviewSchedule: mocks.mockPrismaReviewSchedule,
     },
 }));
 
@@ -432,6 +439,85 @@ describe('/api/practice', () => {
 
             expect(response.status).toBe(200);
             expect(data.isCorrect).toBe(false);
+        });
+
+        it('答对时应该升级掌握度并推进复习计划', async () => {
+            mocks.mockPrismaPracticeRecord.create.mockResolvedValue({ id: 'r-1' });
+            mocks.mockPrismaErrorItem.findUnique
+                .mockResolvedValueOnce({ userId: 'user-123' })       // 归属校验
+                .mockResolvedValueOnce({ masteryLevel: 1 });          // 读取当前掌握度
+            mocks.mockPrismaReviewSchedule.findFirst.mockResolvedValue({
+                id: 'sch-1', reviewCount: 2, scheduledFor: new Date(),
+            });
+            mocks.mockPrismaReviewSchedule.update.mockResolvedValue({});
+            mocks.mockPrismaErrorItem.update.mockResolvedValue({});
+            mocks.mockPrismaReviewSchedule.create.mockResolvedValue({});
+
+            const request = new Request('http://localhost/api/practice/record', {
+                method: 'POST',
+                body: JSON.stringify({ subject: '数学', difficulty: 'medium', isCorrect: true, errorItemId: 'item-1' }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            const response = await RECORD_POST(request);
+
+            expect(response.status).toBe(200);
+            // 掌握度 1 → 2
+            expect(mocks.mockPrismaErrorItem.update).toHaveBeenCalledWith(
+                expect.objectContaining({ data: { masteryLevel: 2 } })
+            );
+            // 完成旧计划 + 创建 stage 3（间隔 7 天）的新计划
+            expect(mocks.mockPrismaReviewSchedule.update).toHaveBeenCalledWith(
+                expect.objectContaining({ data: expect.objectContaining({ isCorrect: true }) })
+            );
+            expect(mocks.mockPrismaReviewSchedule.create).toHaveBeenCalledWith(
+                expect.objectContaining({ data: expect.objectContaining({ reviewCount: 3 }) })
+            );
+        });
+
+        it('答错时应该重置掌握度与复习计划', async () => {
+            mocks.mockPrismaPracticeRecord.create.mockResolvedValue({ id: 'r-2' });
+            mocks.mockPrismaErrorItem.findUnique
+                .mockResolvedValueOnce({ userId: 'user-123' })
+                .mockResolvedValueOnce({ masteryLevel: 2 });
+            mocks.mockPrismaReviewSchedule.findFirst.mockResolvedValue({
+                id: 'sch-2', reviewCount: 4, scheduledFor: new Date(),
+            });
+            mocks.mockPrismaReviewSchedule.update.mockResolvedValue({});
+            mocks.mockPrismaErrorItem.update.mockResolvedValue({});
+            mocks.mockPrismaReviewSchedule.create.mockResolvedValue({});
+
+            const request = new Request('http://localhost/api/practice/record', {
+                method: 'POST',
+                body: JSON.stringify({ subject: '数学', difficulty: 'medium', isCorrect: false, errorItemId: 'item-1' }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            const response = await RECORD_POST(request);
+
+            expect(response.status).toBe(200);
+            // 掌握度与复习次数均重置
+            expect(mocks.mockPrismaErrorItem.update).toHaveBeenCalledWith(
+                expect.objectContaining({ data: { masteryLevel: 0 } })
+            );
+            expect(mocks.mockPrismaReviewSchedule.create).toHaveBeenCalledWith(
+                expect.objectContaining({ data: expect.objectContaining({ reviewCount: 0 }) })
+            );
+        });
+
+        it('非本人错题应返回 403', async () => {
+            mocks.mockPrismaPracticeRecord.create.mockResolvedValue({ id: 'r-3' });
+            mocks.mockPrismaErrorItem.findUnique.mockResolvedValueOnce({ userId: 'other-user' });
+
+            const request = new Request('http://localhost/api/practice/record', {
+                method: 'POST',
+                body: JSON.stringify({ subject: '数学', difficulty: 'medium', isCorrect: true, errorItemId: 'item-1' }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            const response = await RECORD_POST(request);
+
+            expect(response.status).toBe(403);
         });
 
         it('应该记录不同学科的练习结果', async () => {

@@ -338,6 +338,9 @@ export const translations = {
             filteringByTag: "Filtering by tag",
             grade: "Grade/Semester",
             paperLevel: "Paper Level",
+            dueBanner: "Due for review today",
+            dueItems: "questions",
+            dueOverdueDays: "overdue {days}d",
         },
         stats: {
             title: "Practice Statistics",
@@ -986,6 +989,9 @@ export const translations = {
             filteringByTag: "按标签筛选",
             grade: "年级/学期",
             paperLevel: "所属卷等级",
+            dueBanner: "今日待复习",
+            dueItems: "题",
+            dueOverdueDays: "逾期 {days} 天",
         },
         stats: {
             title: "练习统计",

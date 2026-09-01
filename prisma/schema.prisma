@@ -124,6 +124,8 @@ model ReviewSchedule {
   scheduledFor DateTime
   completedAt  DateTime?
   isCorrect    Boolean? // Result of the review
+
+  reviewCount  Int       @default(0) // 已完成的复习次数（艾宾浩斯阶段）
   
   createdAt    DateTime @default(now())
 }

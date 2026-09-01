@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Filter, CheckCircle, Clock, ChevronDown, Printer, ListChecks, Trash2, X } from "lucide-react";
+import { Search, Filter, CheckCircle, Clock, ChevronDown, Printer, ListChecks, Trash2, X, Bell } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -49,6 +49,9 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const [paperLevelFilter, setPaperLevelFilter] = useState<"all" | "a" | "b" | "other">("all");
     const [selectedTag, setSelectedTag] = useState<string | null>(null);
     const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
+    // 到期待复习（艾宾浩斯计划）
+    const [dueReviews, setDueReviews] = useState<Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null } }>>([]);
+    const [showDueList, setShowDueList] = useState(false);
     // 分页状态
     const [page, setPage] = useState(1);
     const [pageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -60,6 +63,18 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const [isDeleting, setIsDeleting] = useState(false);
     const { t, language } = useLanguage();
     const router = useRouter();
+
+    // 拉取到期待复习数量（艾宾浩斯计划）
+    useEffect(() => {
+        let cancelled = false;
+        const query = subjectId ? `?subjectId=${subjectId}` : "";
+        apiClient.get<{ count: number; items: Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null } }> }>(`/api/review/due${query}`)
+            .then((data) => {
+                if (!cancelled) setDueReviews(data.items || []);
+            })
+            .catch(() => { /* 静默失败，不影响主列表 */ });
+        return () => { cancelled = true; };
+    }, [subjectId, items.length]);
 
     const handleExportPrint = () => {
         const params = new URLSearchParams();
@@ -230,6 +245,44 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
 
     return (
         <div className="space-y-6">
+            {dueReviews.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950">
+                    <button
+                        type="button"
+                        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-amber-900 dark:text-amber-200"
+                        onClick={() => setShowDueList((v) => !v)}
+                    >
+                        <Bell className="h-4 w-4" />
+                        <span>
+                            {t.filter.dueBanner || "Due for review today"}：{dueReviews.length} {t.filter.dueItems || ""}
+                        </span>
+                        <ChevronDown
+                            className={`ml-auto h-4 w-4 transition-transform ${showDueList ? "rotate-180" : ""}`}
+                        />
+                    </button>
+                    {showDueList && (
+                        <ul className="divide-y divide-amber-100 border-t border-amber-200 dark:divide-amber-900 dark:border-amber-900">
+                            {dueReviews.slice(0, 10).map((d) => (
+                                <li key={d.errorItem.id}>
+                                    <Link
+                                        href={`/error-items/${d.errorItem.id}`}
+                                        className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-amber-100/60 dark:hover:bg-amber-900/40"
+                                    >
+                                        <span className="flex-1 truncate">
+                                            {cleanMarkdown(d.errorItem.questionText || "").slice(0, 60) || "（无题干）"}
+                                        </span>
+                                        {d.overdueDays > 0 && (
+                                            <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">
+                                                {(t.filter.dueOverdueDays || "overdue {days}d").replace("{days}", String(d.overdueDays))}
+                                            </span>
+                                        )}
+                                    </Link>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </div>
+            )}
             <div className="flex flex-col sm:flex-row gap-4">
                 <div className="relative w-full sm:flex-1">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />

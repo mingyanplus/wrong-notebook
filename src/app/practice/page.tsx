@@ -121,7 +121,8 @@ function PracticeContent() {
         apiClient.post("/api/practice/record", {
             subject: question.subject || "Unknown",
             difficulty,
-            isCorrect: isMatch
+            isCorrect: isMatch,
+            errorItemId
         }).catch(err => console.error("Failed to save practice record:", err));
     };
 
