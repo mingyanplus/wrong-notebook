@@ -53,6 +53,7 @@ interface ErrorItemDetail {
     secondaryErrorCategories?: string | null;
     questionType?: string | null;
     stuckPoint?: string | null;
+    source?: string | null;
 }
 
 export default function ErrorDetailPage() {
@@ -69,6 +70,7 @@ export default function ErrorDetailPage() {
     const [isEditingMetadata, setIsEditingMetadata] = useState(false);
     const [gradeSemesterInput, setGradeSemesterInput] = useState("");
     const [paperLevelInput, setPaperLevelInput] = useState("a");
+    const [sourceInput, setSourceInput] = useState("");
     const [notebookInput, setNotebookInput] = useState<string | null>(null);
 
     const [educationStage, setEducationStage] = useState<string | undefined>(undefined);
@@ -237,6 +239,7 @@ export default function ErrorDetailPage() {
             setNotebookInput(item.subjectId || null);
             setGradeSemesterInput(item.gradeSemester || "");
             setPaperLevelInput(item.paperLevel || "a");
+            setSourceInput(item.source || "");
             setIsEditingMetadata(true);
         }
     };
@@ -247,6 +250,7 @@ export default function ErrorDetailPage() {
                 subjectId: notebookInput || null,
                 gradeSemester: gradeSemesterInput,
                 paperLevel: paperLevelInput,
+                source: sourceInput,
             });
 
             setIsEditingMetadata(false);
@@ -263,6 +267,7 @@ export default function ErrorDetailPage() {
         setNotebookInput(null);
         setGradeSemesterInput("");
         setPaperLevelInput("a");
+        setSourceInput("");
     };
 
     const [isEditingQuestion, setIsEditingQuestion] = useState(false);
@@ -546,6 +551,7 @@ export default function ErrorDetailPage() {
                                     <div className="space-y-2"><label className="text-sm text-muted-foreground">{t.notebooks?.title || "Notebook"}</label><NotebookSelector value={notebookInput || undefined} onChange={setNotebookInput} /></div>
                                     <div className="space-y-2"><label className="text-sm text-muted-foreground">{t.filter.grade}</label><Input value={gradeSemesterInput} onChange={e => setGradeSemesterInput(e.target.value)} placeholder={t.notebook?.gradeSemesterPlaceholder || "e.g. Grade 7, Semester 1"} /></div>
                                     <div className="space-y-2"><label className="text-sm text-muted-foreground">{t.filter.paperLevel}</label><Select value={paperLevelInput} onValueChange={setPaperLevelInput}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="a">{t.editor.paperLevels?.a || "Paper A"}</SelectItem><SelectItem value="b">{t.editor.paperLevels?.b || "Paper B"}</SelectItem><SelectItem value="other">{t.editor.paperLevels?.other || "Other"}</SelectItem></SelectContent></Select></div>
+                                    <div className="space-y-2"><label className="text-sm text-muted-foreground">{t.editor?.sourcePaper || "来源试卷"}</label><Input value={sourceInput} onChange={e => setSourceInput(e.target.value)} placeholder={t.editor?.sourcePaperPlaceholder || "例如：期中试卷"} /></div>
                                     <div className="flex gap-2"><Button size="sm" onClick={saveMetadataHandler}><Save className="h-4 w-4 mr-1" />{t.common?.save || "Save"}</Button><Button size="sm" variant="outline" onClick={cancelEditingMetadata}><X className="h-4 w-4 mr-1" />{t.common?.cancel || "Cancel"}</Button></div>
                                 </div>
                             ) : (

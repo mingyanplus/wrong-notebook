@@ -75,7 +75,7 @@ export async function PUT(
         }
 
         const body = await req.json();
-        const { knowledgePoints, gradeSemester, paperLevel, questionText, answerText, analysis, subjectId,  wrongAnswerText, mistakeAnalysis, mistakeStatus, geogebraCommands, errorCategory, secondaryErrorCategories, questionType, stuckPoint } = body;
+        const { knowledgePoints, gradeSemester, paperLevel, questionText, answerText, analysis, subjectId,  wrongAnswerText, mistakeAnalysis, mistakeStatus, geogebraCommands, errorCategory, secondaryErrorCategories, questionType, stuckPoint, source } = body;
 
         const errorItem = await prisma.errorItem.findUnique({
             where: { id },
@@ -124,6 +124,7 @@ export async function PUT(
         }
         if (questionType !== undefined) updateData.questionType = questionType || null;
         if (stuckPoint !== undefined) updateData.stuckPoint = stuckPoint || null;
+        if (source !== undefined) updateData.source = source || null;
 
         // 处理 knowledgePoints (标签)
         if (knowledgePoints !== undefined) {

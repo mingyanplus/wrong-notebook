@@ -29,6 +29,7 @@ interface ParsedQuestionWithSubject extends ParsedQuestion {
     gradeSemester?: string;
     paperLevel?: string;
     geogebraCommands?: string;
+    source?: string;
 }
 
 interface CorrectionEditorProps {
@@ -285,6 +286,15 @@ export function CorrectionEditor({ initialData, onSave, onCancel, imagePreview, 
                                 </SelectContent>
                             </Select>
                         </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>{t.editor.sourcePaper || "来源试卷"}</Label>
+                        <Input
+                            value={data.source || ""}
+                            onChange={(e) => setData({ ...data, source: e.target.value })}
+                            placeholder={t.editor.sourcePaperPlaceholder || "例如：期中试卷、2025 年一模"}
+                        />
                     </div>
 
                     <div className="space-y-2">

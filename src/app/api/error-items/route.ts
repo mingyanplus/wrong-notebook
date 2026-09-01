@@ -35,6 +35,7 @@ export async function POST(req: Request) {
             errorCategory,
             secondaryErrorCategories,
             questionType,
+            source,
         } = body;
 
         // 记录请求参数（不记录完整图片数据）
@@ -183,6 +184,7 @@ export async function POST(req: Request) {
                         ? JSON.stringify(secondaryErrorCategories.slice(0, 2))
                         : null,
                     questionType: questionType || null,
+                    source: source || null,
                     masteryLevel: 0,
                     tags: {
                         connect: tagConnections,

@@ -51,6 +51,8 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const [paperLevelFilter, setPaperLevelFilter] = useState<"all" | "a" | "b" | "other">("all");
     const [errorCategoryFilter, setErrorCategoryFilter] = useState<string>("all");
     const [isBackfilling, setIsBackfilling] = useState(false);
+    const [sourceFilter, setSourceFilter] = useState<string>("all");
+    const [availableSources, setAvailableSources] = useState<string[]>([]);
     const [selectedTag, setSelectedTag] = useState<string | null>(null);
     const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
     // 到期待复习（艾宾浩斯计划）
@@ -77,6 +79,11 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                 if (!cancelled) setDueReviews(data.items || []);
             })
             .catch(() => { /* 静默失败，不影响主列表 */ });
+        apiClient.get<string[]>("/api/error-items/sources")
+            .then((data) => {
+                if (!cancelled) setAvailableSources(data || []);
+            })
+            .catch(() => { /* 静默失败 */ });
         return () => { cancelled = true; };
     }, [subjectId, items.length]);
 
@@ -97,6 +104,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         if (chapterFilter) params.append("chapter", chapterFilter); // 章节筛选
         if (paperLevelFilter !== "all") params.append("paperLevel", paperLevelFilter);
         if (errorCategoryFilter !== "all") params.append("errorCategory", errorCategoryFilter);
+        if (sourceFilter !== "all") params.append("source", sourceFilter);
 
         router.push(`/print-preview?${params.toString()}`);
     };
@@ -188,7 +196,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     };
 
     // 追踪筛选条件是否变化（用于判断是否需要重置页码）
-    const prevFiltersRef = useRef({ search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter });
+    const prevFiltersRef = useRef({ search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter, sourceFilter });
 
     useEffect(() => {
         const prevFilters = prevFiltersRef.current;
@@ -201,10 +209,11 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
             prevFilters.gradeFilter !== gradeFilter ||
             prevFilters.chapterFilter !== chapterFilter ||
             prevFilters.paperLevelFilter !== paperLevelFilter ||
-            prevFilters.errorCategoryFilter !== errorCategoryFilter;
+            prevFilters.errorCategoryFilter !== errorCategoryFilter ||
+            prevFilters.sourceFilter !== sourceFilter;
 
         // 更新 ref
-        prevFiltersRef.current = { search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter };
+        prevFiltersRef.current = { search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter, sourceFilter };
 
         if (filtersChanged && page !== 1) {
             // 筛选条件变化且不在第一页，重置到第一页（会再次触发此 effect）
@@ -214,7 +223,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
 
         // 正常请求数据
         fetchItems();
-    }, [page, search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter]);
+    }, [page, search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter, sourceFilter]);
 
     const fetchItems = async () => {
         setLoading(true);
@@ -235,6 +244,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
             if (chapterFilter) params.append("chapter", chapterFilter); // 章节筛选
             if (paperLevelFilter !== "all") params.append("paperLevel", paperLevelFilter);
             if (errorCategoryFilter !== "all") params.append("errorCategory", errorCategoryFilter);
+            if (sourceFilter !== "all") params.append("source", sourceFilter);
             // 分页参数
             params.append("page", page.toString());
             params.append("pageSize", pageSize.toString());
@@ -427,6 +437,19 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                         <WandSparkles className={`h-4 w-4 ${isBackfilling ? "animate-pulse" : ""}`} />
                         <span className="hidden sm:inline">{isBackfilling ? (t.filter.backfillRunning || "补全中…") : (t.filter.backfill || "批量补全")}</span>
                     </Button>
+                    {availableSources.length > 0 && (
+                        <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                            <SelectTrigger size="sm" className="w-[150px]">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">{t.filter.sourcePaper || "全部来源"}</SelectItem>
+                                {availableSources.map((s) => (
+                                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    )}
                 </div>
             </div>
 

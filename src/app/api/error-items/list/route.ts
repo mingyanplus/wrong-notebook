@@ -19,6 +19,7 @@ export async function GET(req: Request) {
     const timeRange = searchParams.get("timeRange");
     const tag = searchParams.get("tag");
     const errorCategory = searchParams.get("errorCategory");
+    const source = searchParams.get("source");
 
     // 分页参数
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
@@ -74,6 +75,11 @@ export async function GET(req: Request) {
             } else {
                 whereClause.errorCategory = errorCategory;
             }
+        }
+
+        // 来源试卷筛选（包含匹配，便于按“期中”匹配“期中试卷”）
+        if (source && source !== "all") {
+            whereClause.source = { contains: source };
         }
 
         // Time range filter
