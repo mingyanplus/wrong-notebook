@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth-utils";
 import { getAppConfig, updateAppConfig } from "@/lib/config";
-import { internalError } from "@/lib/api-errors";
+import { internalError, unauthorized, forbidden } from "@/lib/api-errors";
 import { createLogger } from "@/lib/logger";
 import { OpenAIInstance } from "@/types/api";
 
@@ -9,12 +12,24 @@ const logger = createLogger('api:settings');
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
+    const session = await getServerSession(authOptions);
+
+    if (!session) {
+        return unauthorized("Authentication required");
+    }
+
     const config = getAppConfig();
     // Return full config including API keys since this is an authenticated endpoint
     return NextResponse.json(config);
 }
 
 export async function POST(req: Request) {
+    const session = await getServerSession(authOptions);
+
+    if (!requireAdmin(session)) {
+        return forbidden("Admin access required");
+    }
+
     try {
         const body = await req.json();
         const currentConfig = getAppConfig();

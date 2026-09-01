@@ -33,6 +33,22 @@ const mocks = vi.hoisted(() => ({
         ...config,
         aiProvider: config.aiProvider || 'gemini',
     })),
+    mockSession: {
+        user: {
+            id: 'admin-id',
+            email: 'admin@localhost',
+            role: 'admin',
+        },
+        expires: '2026-12-31',
+    },
+    mockUserSession: {
+        user: {
+            id: 'user-id',
+            email: 'user@localhost',
+            role: 'user',
+        },
+        expires: '2026-12-31',
+    },
 }));
 
 // Mock config module
@@ -41,12 +57,62 @@ vi.mock('@/lib/config', () => ({
     updateAppConfig: mocks.mockUpdateAppConfig,
 }));
 
+// Mock next-auth
+vi.mock('next-auth', () => ({
+    getServerSession: vi.fn(() => Promise.resolve(mocks.mockSession)),
+}));
+
+vi.mock('@/lib/auth', () => ({
+    authOptions: {},
+}));
+
 // Import after mocks
 import { GET, POST } from '@/app/api/settings/route';
+import { getServerSession } from 'next-auth';
 
 describe('/api/settings', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        // Reset session to admin by default
+        vi.mocked(getServerSession).mockResolvedValue(mocks.mockSession);
+    });
+
+    describe('认证保护', () => {
+        it('GET 未登录应返回 401', async () => {
+            vi.mocked(getServerSession).mockResolvedValueOnce(null);
+
+            const response = await GET();
+
+            expect(response.status).toBe(401);
+        });
+
+        it('POST 未登录应返回 403', async () => {
+            vi.mocked(getServerSession).mockResolvedValueOnce(null);
+
+            const request = new Request('http://localhost/api/settings', {
+                method: 'POST',
+                body: JSON.stringify({ aiProvider: 'openai' }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            const response = await POST(request);
+
+            expect(response.status).toBe(403);
+        });
+
+        it('POST 普通用户（非 admin）应返回 403', async () => {
+            vi.mocked(getServerSession).mockResolvedValueOnce(mocks.mockUserSession);
+
+            const request = new Request('http://localhost/api/settings', {
+                method: 'POST',
+                body: JSON.stringify({ aiProvider: 'openai' }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            const response = await POST(request);
+
+            expect(response.status).toBe(403);
+        });
     });
 
     describe('GET /api/settings', () => {
