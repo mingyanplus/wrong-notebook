@@ -75,7 +75,7 @@ export async function PUT(
         }
 
         const body = await req.json();
-        const { knowledgePoints, gradeSemester, paperLevel, questionText, answerText, analysis, subjectId,  wrongAnswerText, mistakeAnalysis, mistakeStatus, geogebraCommands } = body;
+        const { knowledgePoints, gradeSemester, paperLevel, questionText, answerText, analysis, subjectId,  wrongAnswerText, mistakeAnalysis, mistakeStatus, geogebraCommands, errorCategory, secondaryErrorCategories, questionType, stuckPoint } = body;
 
         const errorItem = await prisma.errorItem.findUnique({
             where: { id },
@@ -116,6 +116,14 @@ export async function PUT(
             );
         }
         if (geogebraCommands !== undefined) updateData.geogebraCommands = geogebraCommands || null;
+        if (errorCategory !== undefined) updateData.errorCategory = errorCategory || null;
+        if (secondaryErrorCategories !== undefined) {
+            updateData.secondaryErrorCategories = Array.isArray(secondaryErrorCategories)
+                ? JSON.stringify(secondaryErrorCategories.slice(0, 2))
+                : null;
+        }
+        if (questionType !== undefined) updateData.questionType = questionType || null;
+        if (stuckPoint !== undefined) updateData.stuckPoint = stuckPoint || null;
 
         // 处理 knowledgePoints (标签)
         if (knowledgePoints !== undefined) {

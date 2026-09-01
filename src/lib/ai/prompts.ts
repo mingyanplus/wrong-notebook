@@ -146,6 +146,21 @@ export const DEFAULT_ANALYZE_TEMPLATE = `【角色与核心任务 (ROLE AND CORE
 如果图片中包含错误解答，请分析错误可能发生在哪一步、为什么错、导致了什么后果；如果没有错误解答，请留空。
 </mistake_analysis>
 
+<question_type>
+判断题型，填写以下值之一：choice（选择题）、fill（填空题）、solve（解答题/计算题/主观题）、judge（判断题）。
+</question_type>
+
+<error_category>
+分析学生的主要错误原因，填写以下 code 之一：
+concept（概念不清：定义/定理/性质理解错误）、formula（公式记错：公式本身回忆错误）、calculation（计算失误：思路对但算错）、misread（审题偏差：漏条件、理解错题意）、method（方法选择错误：用错方法或绕远路）、stuck（思路卡壳：无从下手、卡在关键步骤）、expression（表述不规范：会做但过程/格式丢分）、careless（粗心/时间不足：抄错数、看错、没做完）。
+英语题可用：vocab（词义混淆）。语文选择题可用：trap（设错点误判）。历史/地理/政治可用：recall（记忆性错误）。
+如果图片中没有学生作答、无法判断错误原因，填写 unknown。
+</error_category>
+
+<secondary_error_categories>
+次要错误原因，最多 2 个，用逗号分隔填写 code（同上）；没有则留空。
+</secondary_error_categories>
+
 <question_text>
 在此处填写题目的完整文本。使用 Markdown 格式。所有数学公式使用 LaTeX 符号（行内 $...$，块级 $$...$$）。
 
@@ -204,7 +219,7 @@ export const DEFAULT_ANALYZE_TEMPLATE = `【角色与核心任务 (ROLE AND CORE
 - 每题最多 5 个标签。
 
 【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
-1. **格式严格**：必须严格包含上述 9 个 XML 标签，除此之外不要输出任何其他“开场白”或“结束语”。
+1. **格式严格**：必须严格包含上述 12 个 XML 标签，除此之外不要输出任何其他“开场白”或“结束语”。
 2. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。
 3. **内容完整**：如果包含子问题，请在 question_text 中完整列出。
 4. **禁止图片**：严禁包含任何图片链接或 markdown 图片语法。

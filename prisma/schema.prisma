@@ -103,8 +103,14 @@ model ErrorItem {
   
   // User Metadata
   source           String? // e.g. "Midterm Exam"
-  errorType        String? // e.g. "Calculation", "Concept"
+  errorType        String? // e.g. "Calculation", "Concept" [DEPRECATED] 旧自由文本，保留兼容
   userNotes        String?
+
+  // 结构化错因（grilling 定案）：主错因 + 次错因（JSON 数组，最多 2 个）
+  errorCategory        String? // 主错因 code，见 src/lib/error-categories.ts
+  secondaryErrorCategories String? // JSON string: ["calculation", ...]
+  questionType     String? // choice / fill / solve / judge
+  stuckPoint       String? // 卡壳点/关键步骤笔记（供变式题生成定向）
   
   masteryLevel     Int     @default(0) // 0: New, 1: Reviewing, 2: Mastered
   gradeSemester    String? // e.g. "Junior High Grade 2, 1st Semester"

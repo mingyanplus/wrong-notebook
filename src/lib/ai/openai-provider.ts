@@ -6,6 +6,7 @@ import { safeParseParsedQuestion } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
 import { normalizeMistakeStatusForSave } from '../mistake-status';
+import { parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from '../error-categories';
 
 const logger = createLogger('ai:openai');
 
@@ -110,6 +111,9 @@ export class OpenAIProvider implements AIService {
         const wrongAnswerText = this.extractTag(text, "wrong_answer_text") || "";
         const mistakeAnalysis = this.extractTag(text, "mistake_analysis") || "";
         const mistakeStatusRaw = this.extractTag(text, "mistake_status");
+        const errorCategory = parseErrorCategoryCode(this.extractTag(text, "error_category"));
+        const secondaryErrorCategories = parseSecondaryCategories(this.extractTag(text, "secondary_error_categories"), errorCategory);
+        const questionType = parseQuestionTypeCode(this.extractTag(text, "question_type"));
 
         // Basic Validation
         if (!questionText || !answerText || !analysis) {
@@ -145,7 +149,10 @@ export class OpenAIProvider implements AIService {
             mistakeStatus,
             subject,
             knowledgePoints,
-            requiresImage
+            requiresImage,
+            errorCategory,
+            secondaryErrorCategories,
+            questionType
         };
 
         // Final Schema Validation (just to be safe, though likely compliant by now)

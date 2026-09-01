@@ -63,6 +63,11 @@ export interface ErrorItem {
     source?: string | null;
     errorType?: string | null;
     userNotes?: string | null;
+    // 结构化错因
+    errorCategory?: string | null;
+    secondaryErrorCategories?: string | null;
+    questionType?: string | null;
+    stuckPoint?: string | null;
     tags?: Tag[];
 
     masteryLevel: number;

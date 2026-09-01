@@ -20,6 +20,8 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { KnowledgeFilter } from "@/components/knowledge-filter";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ERROR_CATEGORIES } from "@/lib/error-categories";
 import { ErrorItem, PaginatedResponse } from "@/types/api";
 import { apiClient } from "@/lib/api-client";
 import { cleanMarkdown } from "@/lib/markdown-utils";
@@ -47,6 +49,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const [gradeFilter, setGradeFilter] = useState("");
     const [chapterFilter, setChapterFilter] = useState("");
     const [paperLevelFilter, setPaperLevelFilter] = useState<"all" | "a" | "b" | "other">("all");
+    const [errorCategoryFilter, setErrorCategoryFilter] = useState<string>("all");
     const [selectedTag, setSelectedTag] = useState<string | null>(null);
     const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
     // 到期待复习（艾宾浩斯计划）
@@ -92,6 +95,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         if (gradeFilter) params.append("gradeSemester", gradeFilter);
         if (chapterFilter) params.append("chapter", chapterFilter); // 章节筛选
         if (paperLevelFilter !== "all") params.append("paperLevel", paperLevelFilter);
+        if (errorCategoryFilter !== "all") params.append("errorCategory", errorCategoryFilter);
 
         router.push(`/print-preview?${params.toString()}`);
     };
@@ -183,7 +187,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     };
 
     // 追踪筛选条件是否变化（用于判断是否需要重置页码）
-    const prevFiltersRef = useRef({ search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter });
+    const prevFiltersRef = useRef({ search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter });
 
     useEffect(() => {
         const prevFilters = prevFiltersRef.current;
@@ -195,10 +199,11 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
             prevFilters.subjectId !== subjectId ||
             prevFilters.gradeFilter !== gradeFilter ||
             prevFilters.chapterFilter !== chapterFilter ||
-            prevFilters.paperLevelFilter !== paperLevelFilter;
+            prevFilters.paperLevelFilter !== paperLevelFilter ||
+            prevFilters.errorCategoryFilter !== errorCategoryFilter;
 
         // 更新 ref
-        prevFiltersRef.current = { search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter };
+        prevFiltersRef.current = { search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter };
 
         if (filtersChanged && page !== 1) {
             // 筛选条件变化且不在第一页，重置到第一页（会再次触发此 effect）
@@ -208,7 +213,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
 
         // 正常请求数据
         fetchItems();
-    }, [page, search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter]);
+    }, [page, search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter]);
 
     const fetchItems = async () => {
         setLoading(true);
@@ -228,6 +233,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
             if (gradeFilter) params.append("gradeSemester", gradeFilter);
             if (chapterFilter) params.append("chapter", chapterFilter); // 章节筛选
             if (paperLevelFilter !== "all") params.append("paperLevel", paperLevelFilter);
+            if (errorCategoryFilter !== "all") params.append("errorCategory", errorCategoryFilter);
             // 分页参数
             params.append("page", page.toString());
             params.append("pageSize", pageSize.toString());
@@ -379,6 +385,21 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                     >
                         {t.editor.paperLevels?.other || "Other"}
                     </Button>
+                    <Select
+                        value={errorCategoryFilter}
+                        onValueChange={(val) => setErrorCategoryFilter(val)}
+                    >
+                        <SelectTrigger size="sm" className="w-[140px]">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">{t.filter.errorCategory || "全部错因"}</SelectItem>
+                            <SelectItem value="unknown">{t.filter.errorCategoryUnknown || "未分类"}</SelectItem>
+                            {ERROR_CATEGORIES.map((c) => (
+                                <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
             </div>
 

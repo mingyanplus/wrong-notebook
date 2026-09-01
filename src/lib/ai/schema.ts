@@ -18,6 +18,17 @@ export const ParsedQuestionSchema = z.object({
     ]),
     knowledgePoints: z.array(z.string()).max(5, "知识点最多 5 个"),
     requiresImage: z.boolean().optional().default(false), // 题目是否依赖图片（如几何题）
+    // 结构化错因（AI 判定，编辑器确认）
+    errorCategory: z.enum([
+        "concept", "formula", "calculation", "misread", "method",
+        "stuck", "expression", "careless", "vocab", "trap", "recall",
+        "unknown",
+    ]).optional().default("unknown"),
+    secondaryErrorCategories: z.array(z.enum([
+        "concept", "formula", "calculation", "misread", "method",
+        "stuck", "expression", "careless", "vocab", "trap", "recall",
+    ])).max(2, "次错因最多 2 个").optional().default([]),
+    questionType: z.enum(["choice", "fill", "solve", "judge"]).optional().default("solve"),
 });
 
 /**

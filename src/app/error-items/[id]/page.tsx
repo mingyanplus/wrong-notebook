@@ -17,6 +17,7 @@ import { apiClient } from "@/lib/api-client";
 import { UserProfile, Notebook } from "@/types/api";
 import { inferSubjectFromName } from "@/lib/knowledge-tags";
 import { getMistakeStatusLabel, normalizeMistakeStatusForSave } from "@/lib/mistake-status";
+import { QUESTION_TYPES, getErrorCategoryLabel, getQuestionTypeLabel, getCategoriesForSubject } from "@/lib/error-categories";
 import { NotebookSelector } from "@/components/notebook-selector";
 import { GeogebraDemo } from "@/components/geogebra-demo";
 
@@ -48,6 +49,10 @@ interface ErrorItemDetail {
     gradeSemester?: string | null;
     paperLevel?: string | null;
     geogebraCommands?: string | null;
+    errorCategory?: string | null;
+    secondaryErrorCategories?: string | null;
+    questionType?: string | null;
+    stuckPoint?: string | null;
 }
 
 export default function ErrorDetailPage() {
@@ -273,6 +278,10 @@ export default function ErrorDetailPage() {
     const [wrongAnswerInput, setWrongAnswerInput] = useState("");
     const [mistakeAnalysisInput, setMistakeAnalysisInput] = useState("");
     const [mistakeStatusInput, setMistakeStatusInput] = useState("unknown");
+    const [errorCategoryInput, setErrorCategoryInput] = useState("unknown");
+    const [secondaryCategoriesInput, setSecondaryCategoriesInput] = useState<string[]>([]);
+    const [questionTypeInput, setQuestionTypeInput] = useState("solve");
+    const [stuckPointInput, setStuckPointInput] = useState("");
 
     // --- Question Handlers ---
     const startEditingQuestion = () => {
@@ -355,6 +364,15 @@ export default function ErrorDetailPage() {
             setWrongAnswerInput(item.wrongAnswerText || "");
             setMistakeAnalysisInput(item.mistakeAnalysis || "");
             setMistakeStatusInput(item.mistakeStatus || "unknown");
+            setErrorCategoryInput(item.errorCategory || "unknown");
+            try {
+                const secondary = item.secondaryErrorCategories ? JSON.parse(item.secondaryErrorCategories) : [];
+                setSecondaryCategoriesInput(Array.isArray(secondary) ? secondary : []);
+            } catch {
+                setSecondaryCategoriesInput([]);
+            }
+            setQuestionTypeInput(item.questionType || "solve");
+            setStuckPointInput(item.stuckPoint || "");
             setIsEditingMistake(true);
         }
     };
@@ -369,6 +387,10 @@ export default function ErrorDetailPage() {
                 wrongAnswerText: wrongAnswerInput,
                 mistakeAnalysis: mistakeAnalysisInput,
                 mistakeStatus: normalizedStatus,
+                errorCategory: errorCategoryInput === "unknown" ? null : errorCategoryInput,
+                secondaryErrorCategories: secondaryCategoriesInput.filter((c) => c !== errorCategoryInput).slice(0, 2),
+                questionType: questionTypeInput,
+                stuckPoint: stuckPointInput,
             });
             setIsEditingMistake(false);
             if (item) {
@@ -377,6 +399,10 @@ export default function ErrorDetailPage() {
                     wrongAnswerText: wrongAnswerInput,
                     mistakeAnalysis: mistakeAnalysisInput,
                     mistakeStatus: normalizedStatus,
+                    errorCategory: errorCategoryInput === "unknown" ? null : errorCategoryInput,
+                    secondaryErrorCategories: JSON.stringify(secondaryCategoriesInput.filter((c) => c !== errorCategoryInput).slice(0, 2)),
+                    questionType: questionTypeInput,
+                    stuckPoint: stuckPointInput,
                 });
             }
             alert(t.common?.messages?.saveSuccess || 'Saved successfully');
@@ -391,6 +417,10 @@ export default function ErrorDetailPage() {
         setWrongAnswerInput("");
         setMistakeAnalysisInput("");
         setMistakeStatusInput("unknown");
+        setErrorCategoryInput("unknown");
+        setSecondaryCategoriesInput([]);
+        setQuestionTypeInput("solve");
+        setStuckPointInput("");
     };
 
     const saveNotes = async () => {
@@ -570,7 +600,91 @@ export default function ErrorDetailPage() {
 
                 <div className="grid gap-6 lg:grid-cols-2">
                     <Card><CardHeader><div className="flex justify-between items-center"><CardTitle>{t.detail.analysis}</CardTitle>{!isEditingAnalysis && <Button variant="ghost" size="sm" onClick={startEditingAnalysis}><Edit className="h-4 w-4 mr-1" />{t.common?.edit || "Edit"}</Button>}</div></CardHeader><CardContent>{isEditingAnalysis ? (<div className="space-y-3"><Textarea value={analysisInput} onChange={e => setAnalysisInput(e.target.value)} placeholder="Enter analysis..." rows={12} className="w-full font-mono text-sm" /><div className="flex gap-2"><Button size="sm" onClick={saveAnalysisHandler}><Save className="h-4 w-4 mr-1" />{t.common?.save || "Save"}</Button><Button size="sm" variant="outline" onClick={cancelEditingAnalysis}><X className="h-4 w-4 mr-1" />{t.common?.cancel || "Cancel"}</Button></div></div>) : <MarkdownRenderer content={item.analysis} />}</CardContent></Card>
-                    <Card><CardHeader><div className="flex justify-between items-center"><CardTitle>{t.detail?.mistakeAnalysis || "错因分析"}</CardTitle>{!isEditingMistake && <Button variant="ghost" size="sm" onClick={startEditingMistake}><Edit className="h-4 w-4 mr-1" />{t.common?.edit || "Edit"}</Button>}</div></CardHeader><CardContent>{isEditingMistake ? (<div className="space-y-4"><div className="space-y-2"><label className="text-sm text-muted-foreground">{t.editor?.mistakeAnalysis || "错因分析"}</label><Textarea value={mistakeAnalysisInput} onChange={e => setMistakeAnalysisInput(e.target.value)} rows={8} className="w-full font-mono text-sm" /></div><div className="flex gap-2"><Button size="sm" onClick={saveMistakeHandler}><Save className="h-4 w-4 mr-1" />{t.common?.save || "Save"}</Button><Button size="sm" variant="outline" onClick={cancelEditingMistake}><X className="h-4 w-4 mr-1" />{t.common?.cancel || "Cancel"}</Button></div></div>) : item.mistakeAnalysis ? <MarkdownRenderer content={item.mistakeAnalysis} /> : <p className="text-sm text-muted-foreground italic">{t.detail?.noMistakeAnalysis || "暂无错因分析"}</p>}</CardContent></Card>
+                    <Card>
+                        <CardHeader>
+                            <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <CardTitle>{t.detail?.mistakeAnalysis || "错因分析"}</CardTitle>
+                                    {!isEditingMistake && (
+                                        <>
+                                            <Badge variant="outline">{getErrorCategoryLabel(item.errorCategory)}</Badge>
+                                            <Badge variant="secondary">{getQuestionTypeLabel(item.questionType)}</Badge>
+                                        </>
+                                    )}
+                                </div>
+                                {!isEditingMistake && <Button variant="ghost" size="sm" onClick={startEditingMistake}><Edit className="h-4 w-4 mr-1" />{t.common?.edit || "Edit"}</Button>}
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {isEditingMistake ? (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-muted-foreground">{t.editor?.errorCategory || "主要错因"}</label>
+                                            <Select value={errorCategoryInput} onValueChange={(val) => {
+                                                setErrorCategoryInput(val);
+                                                setSecondaryCategoriesInput((prev) => prev.filter((c) => c !== val));
+                                            }}>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="unknown">{t.editor?.errorCategoryUnknown || "未判定"}</SelectItem>
+                                                    {getCategoriesForSubject(item.subject?.name).map((c) => (
+                                                        <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {errorCategoryInput !== "unknown" && (
+                                                <div className="flex flex-wrap gap-1.5 pt-1">
+                                                    {getCategoriesForSubject(item.subject?.name)
+                                                        .filter((c) => c.code !== errorCategoryInput)
+                                                        .map((c) => {
+                                                            const selected = secondaryCategoriesInput.includes(c.code);
+                                                            return (
+                                                                <button
+                                                                    key={c.code}
+                                                                    type="button"
+                                                                    onClick={() => setSecondaryCategoriesInput((prev) => selected ? prev.filter((x) => x !== c.code) : [...prev, c.code].slice(0, 2))}
+                                                                    className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-input bg-background hover:bg-accent"}`}
+                                                                >
+                                                                    {c.label}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-sm text-muted-foreground">{t.editor?.questionType || "题型"}</label>
+                                            <Select value={questionTypeInput} onValueChange={setQuestionTypeInput}>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    {QUESTION_TYPES.map((qt) => (
+                                                        <SelectItem key={qt.code} value={qt.code}>{qt.label}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-muted-foreground">{t.detail?.stuckPoint || "卡壳点/关键步骤"}</label>
+                                        <Input value={stuckPointInput} onChange={(e) => setStuckPointInput(e.target.value)} placeholder={t.detail?.stuckPointPlaceholder || "记录当时卡在哪一步，供举一反三针对性出题"} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-sm text-muted-foreground">{t.editor?.mistakeAnalysis || "错因分析"}</label>
+                                        <Textarea value={mistakeAnalysisInput} onChange={e => setMistakeAnalysisInput(e.target.value)} rows={8} className="w-full font-mono text-sm" />
+                                    </div>
+                                    <div className="flex gap-2"><Button size="sm" onClick={saveMistakeHandler}><Save className="h-4 w-4 mr-1" />{t.common?.save || "Save"}</Button><Button size="sm" variant="outline" onClick={cancelEditingMistake}><X className="h-4 w-4 mr-1" />{t.common?.cancel || "Cancel"}</Button></div>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {item.stuckPoint ? (
+                                        <div className="rounded-md bg-muted p-2 text-sm"><span className="text-muted-foreground">{t.detail?.stuckPoint || "卡壳点"}：</span>{item.stuckPoint}</div>
+                                    ) : null}
+                                    {item.mistakeAnalysis ? <MarkdownRenderer content={item.mistakeAnalysis} /> : <p className="text-sm text-muted-foreground italic">{t.detail?.noMistakeAnalysis || "暂无错因分析"}</p>}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
                 </div>
 
                 <div className="space-y-6">

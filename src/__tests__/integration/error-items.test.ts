@@ -533,13 +533,46 @@ describe('/api/error-items', () => {
             );
         });
 
+        it('应该支持按错因筛选', async () => {
+            mocks.mockPrismaErrorItem.count.mockResolvedValue(0);
+            mocks.mockPrismaErrorItem.findMany.mockResolvedValue([]);
+
+            const request = new Request('http://localhost/api/error-items/list?errorCategory=concept');
+            const response = await GET_LIST(request);
+
+            expect(response.status).toBe(200);
+            expect(mocks.mockPrismaErrorItem.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        errorCategory: 'concept',
+                    }),
+                })
+            );
+        });
+
+        it('unknown 错因应筛选未分类（errorCategory 为 null）', async () => {
+            mocks.mockPrismaErrorItem.count.mockResolvedValue(0);
+            mocks.mockPrismaErrorItem.findMany.mockResolvedValue([]);
+
+            const request = new Request('http://localhost/api/error-items/list?errorCategory=unknown');
+            const response = await GET_LIST(request);
+
+            expect(response.status).toBe(200);
+            expect(mocks.mockPrismaErrorItem.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        errorCategory: null,
+                    }),
+                })
+            );
+        });
+
         it('应该支持按知识点标签筛选', async () => {
             mocks.mockPrismaErrorItem.count.mockResolvedValue(0);
             mocks.mockPrismaErrorItem.findMany.mockResolvedValue([]);
 
             const request = new Request('http://localhost/api/error-items/list?tag=一元一次方程');
             const response = await GET_LIST(request);
-
             expect(response.status).toBe(200);
             expect(mocks.mockPrismaErrorItem.findMany).toHaveBeenCalledWith(
                 expect.objectContaining({

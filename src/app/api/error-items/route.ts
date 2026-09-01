@@ -32,6 +32,9 @@ export async function POST(req: Request) {
             gradeSemester,
             paperLevel,
             geogebraCommands,
+            errorCategory,
+            secondaryErrorCategories,
+            questionType,
         } = body;
 
         // 记录请求参数（不记录完整图片数据）
@@ -175,6 +178,11 @@ export async function POST(req: Request) {
                     gradeSemester: finalGradeSemester,
                     paperLevel: paperLevel,
                     geogebraCommands: geogebraCommands || null,
+                    errorCategory: errorCategory || null,
+                    secondaryErrorCategories: Array.isArray(secondaryErrorCategories)
+                        ? JSON.stringify(secondaryErrorCategories.slice(0, 2))
+                        : null,
+                    questionType: questionType || null,
                     masteryLevel: 0,
                     tags: {
                         connect: tagConnections,

@@ -18,6 +18,7 @@ export async function GET(req: Request) {
     const mastery = searchParams.get("mastery");
     const timeRange = searchParams.get("timeRange");
     const tag = searchParams.get("tag");
+    const errorCategory = searchParams.get("errorCategory");
 
     // 分页参数
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
@@ -64,6 +65,15 @@ export async function GET(req: Request) {
         if (mastery !== null) {
             // masteryLevel: 0 新录 / 1 复习中 / 2 已掌握
             whereClause.masteryLevel = mastery === "1" ? { gte: 2 } : { lt: 2 };
+        }
+
+        // 错因筛选（主错因精确匹配；unknown 表示未分类）
+        if (errorCategory && errorCategory !== "all") {
+            if (errorCategory === "unknown") {
+                whereClause.errorCategory = null;
+            } else {
+                whereClause.errorCategory = errorCategory;
+            }
         }
 
         // Time range filter
