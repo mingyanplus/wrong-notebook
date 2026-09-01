@@ -8,6 +8,7 @@ import { CorrectionEditor } from "@/components/correction-editor";
 import { ImageCropper } from "@/components/image-cropper";
 import { ParsedQuestion } from "@/lib/ai";
 import { apiClient } from "@/lib/api-client";
+import { parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from "@/lib/error-categories";
 import { AnalyzeResponse, Notebook, AppConfig } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -251,6 +252,9 @@ export default function AddErrorPage() {
                 wrongAnswerText: string;
                 mistakeAnalysis: string;
                 mistakeStatus: string;
+                errorCategory?: string;
+                secondaryErrorCategories?: string[];
+                questionType?: string;
             }>("/api/reanswer", {
                 questionText,
                 language,
@@ -268,6 +272,12 @@ export default function AddErrorPage() {
                 wrongAnswerText: result.wrongAnswerText || "",
                 mistakeAnalysis: result.mistakeAnalysis || "",
                 mistakeStatus: (result.mistakeStatus as any) || "unknown",
+                errorCategory: parseErrorCategoryCode(result.errorCategory),
+                secondaryErrorCategories: parseSecondaryCategories(
+                    Array.isArray(result.secondaryErrorCategories) ? result.secondaryErrorCategories.join(",") : null,
+                    parseErrorCategoryCode(result.errorCategory)
+                ),
+                questionType: parseQuestionTypeCode(result.questionType),
                 subject: "数学",
                 requiresImage: false,
             };

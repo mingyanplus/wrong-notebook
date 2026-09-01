@@ -9,6 +9,7 @@ import { ImageCropper } from "@/components/image-cropper";
 import { ParsedQuestion } from "@/lib/ai";
 import { UserWelcome } from "@/components/user-welcome";
 import { apiClient } from "@/lib/api-client";
+import { parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from "@/lib/error-categories";
 import { AnalyzeResponse, Notebook, AppConfig } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -313,6 +314,9 @@ function HomeContent() {
                 wrongAnswerText: string;
                 mistakeAnalysis: string;
                 mistakeStatus: string;
+                errorCategory?: string;
+                secondaryErrorCategories?: string[];
+                questionType?: string;
             }>("/api/reanswer", {
                 questionText,
                 language,
@@ -330,6 +334,12 @@ function HomeContent() {
                 wrongAnswerText: result.wrongAnswerText || "",
                 mistakeAnalysis: result.mistakeAnalysis || "",
                 mistakeStatus: (result.mistakeStatus as any) || "unknown",
+                errorCategory: parseErrorCategoryCode(result.errorCategory),
+                secondaryErrorCategories: parseSecondaryCategories(
+                    Array.isArray(result.secondaryErrorCategories) ? result.secondaryErrorCategories.join(",") : null,
+                    parseErrorCategoryCode(result.errorCategory)
+                ),
+                questionType: parseQuestionTypeCode(result.questionType),
                 subject: "数学", // Default, will be overridden by notebook selection
                 requiresImage: false,
             };

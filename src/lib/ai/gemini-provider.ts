@@ -254,11 +254,11 @@ export class GeminiProvider implements AIService {
         }
     }
 
-    async generateSimilarQuestion(originalQuestion: string, knowledgePoints: string[], language: 'zh' | 'en' = 'zh', difficulty: DifficultyLevel = 'medium', gradeSemester?: string | null): Promise<ParsedQuestion> {
+    async generateSimilarQuestion(originalQuestion: string, knowledgePoints: string[], language: 'zh' | 'en' = 'zh', difficulty: DifficultyLevel = 'medium', gradeSemester?: string | null, mistakeHint?: string): Promise<ParsedQuestion> {
         const config = getAppConfig();
         const prompt = generateSimilarQuestionPrompt(language, originalQuestion, knowledgePoints, difficulty, {
             customTemplate: config.prompts?.similar
-        }, gradeSemester);
+        }, gradeSemester, mistakeHint);
 
         logger.box('🎯 Generate Similar Question Request', {
             provider: 'Gemini',

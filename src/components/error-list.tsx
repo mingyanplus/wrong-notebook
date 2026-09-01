@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Filter, CheckCircle, Clock, ChevronDown, Printer, ListChecks, Trash2, X, Bell, WandSparkles } from "lucide-react";
+import { Search, Filter, CheckCircle, Clock, ChevronDown, Printer, ListChecks, Trash2, X, Bell, WandSparkles, FileText } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -348,6 +348,10 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                     <Printer className="mr-2 h-4 w-4" />
                     {t.notebook?.exportPrint || "导出打印"}
                 </Button>
+                <Button variant="outline" onClick={() => router.push(`/practice/paper${subjectId ? `?subjectId=${subjectId}` : ""}`)}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    {t.paper?.title || "智能组卷"}
+                </Button>
                 <Button
                     variant={isSelectMode ? "secondary" : "outline"}
                     onClick={toggleSelectMode}
@@ -400,7 +404,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                         value={errorCategoryFilter}
                         onValueChange={(val) => setErrorCategoryFilter(val)}
                     >
-                        <SelectTrigger size="sm" className="w-[140px]">
+                        <SelectTrigger className="h-8 w-[140px]">
                             <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -439,7 +443,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                     </Button>
                     {availableSources.length > 0 && (
                         <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                            <SelectTrigger size="sm" className="w-[150px]">
+                            <SelectTrigger className="h-8 w-[150px]">
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>

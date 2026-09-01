@@ -101,8 +101,8 @@ export function computeWeaknessReport(
         reviewsByItem.set(r.errorItemId, entry);
     }
 
-    const categories = ERROR_CATEGORIES.map((c) => ({ code: c.code, label: c.label }));
-    const categoryIndex = new Map(categories.map((c, i) => [c.code, i]));
+    const categories = ERROR_CATEGORIES.map((c) => ({ code: c.code as string, label: c.label }));
+    const categoryIndex = new Map<string, number>(categories.map((c, i) => [c.code, i]));
 
     // 逐 tag 计算
     const ranking: TagWeakness[] = [];
@@ -126,7 +126,7 @@ export function computeWeaknessReport(
                 const parsed = item.secondaryErrorCategories ? JSON.parse(item.secondaryErrorCategories) : [];
                 if (Array.isArray(parsed)) secondary = parsed;
             } catch { /* ignore */ }
-            for (const code of secondary) {
+            for (const code of secondary as string[]) {
                 const idx = categoryIndex.get(code);
                 if (idx !== undefined) cells[idx] += WEAKNESS_CONFIG.secondaryWeightRatio;
             }

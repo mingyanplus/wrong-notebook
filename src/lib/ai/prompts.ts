@@ -246,6 +246,7 @@ export const DEFAULT_SIMILAR_TEMPLATE = `你是一位资深的K12教育题目生
 	DIFFICULTY LEVEL: {{difficulty_level}}
 	{{difficulty_instruction}}
 	Knowledge Points: {{knowledge_points}}  
+	{{mistake_hint}}
 2. **解构分析**  
    - 提取核心考点与能力要求
    - 分析题目陷阱与解题路径
@@ -439,7 +440,8 @@ export function generateSimilarQuestionPrompt(
   knowledgePoints: string[],
   difficulty: 'easy' | 'medium' | 'hard' | 'harder' = 'medium',
   options?: PromptOptions,
-  gradeSemester?: string | null
+  gradeSemester?: string | null,
+  mistakeHint?: string
 ): string {
   const langInstruction = language === 'zh'
     ? "IMPORTANT: Provide the output based on the 'Original Question' language. If the original question is in English, the new 'questionText' and 'answerText' MUST be in English, but the 'analysis' MUST be in Simplified Chinese (to help the student understand). If the original is in Chinese, everything MUST be in Simplified Chinese."
@@ -460,6 +462,7 @@ export function generateSimilarQuestionPrompt(
     language_instruction: langInstruction,
     original_question: originalQuestion.replace(/"/g, '\\"').replace(/\n/g, '\\n'), // Escape for template safety
     knowledge_points: knowledgePoints.join(", "),
+    mistake_hint: mistakeHint || '',
     grade_instruction: generateGradeInstruction(gradeSemester),
     provider_hints: options?.providerHints || ''
   }).trim();

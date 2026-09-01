@@ -242,12 +242,13 @@ export class AzureOpenAIProvider implements AIService {
         knowledgePoints: string[],
         language: 'zh' | 'en' = 'zh',
         difficulty: DifficultyLevel = 'medium',
-        gradeSemester?: string | null
+        gradeSemester?: string | null,
+        mistakeHint?: string
     ): Promise<ParsedQuestion> {
         const config = getAppConfig();
         const systemPrompt = generateSimilarQuestionPrompt(language, originalQuestion, knowledgePoints, difficulty, {
             customTemplate: config.prompts?.similar
-        }, gradeSemester);
+        }, gradeSemester, mistakeHint);
         const userPrompt = `
 Original Question: "${originalQuestion}"
 Knowledge Points: ${knowledgePoints.join(", ")}

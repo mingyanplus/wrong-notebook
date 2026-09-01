@@ -92,13 +92,13 @@ export function parseErrorCategoryCode(raw: string | null | undefined): ErrorCat
 }
 
 /** 解析次错因（逗号分隔），过滤无效值、去重去主错因，最多 2 个 */
-export function parseSecondaryCategories(raw: string | null | undefined, primary: string | undefined): string[] {
+export function parseSecondaryCategories(raw: string | null | undefined, primary: string | undefined): ErrorCategoryCode[] {
     if (!raw) return [];
     const codes = raw
         .split(/[,，\n]/)
         .map((c) => c.trim().toLowerCase())
-        .filter((c) => c && c !== primary && !!getErrorCategory(c));
-    return Array.from(new Set(codes)).slice(0, 2);
+        .filter((c): c is ErrorCategoryCode => !!c && c !== primary && !!getErrorCategory(c));
+    return Array.from(new Set<ErrorCategoryCode>(codes)).slice(0, 2);
 }
 
 /** 解析题型 code，无效值归一为 "solve" */

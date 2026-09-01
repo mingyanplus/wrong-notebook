@@ -28,6 +28,7 @@ model User {
   errorItems ErrorItem[]
   subjects   Subject[]
   practiceRecords PracticeRecord[]
+  papers     PracticePaper[]
   customTags KnowledgeTag[] // User's custom tags
 }
 
@@ -146,4 +147,45 @@ model PracticeRecord {
   isCorrect Boolean?
   
   createdAt DateTime @default(now())
+}
+
+// 智能组卷：试卷（快照式，生成后与错题解耦，可重复打印/重做/录成绩）
+model PracticePaper {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title     String
+  subjectId String?   // 来源错题本
+  mode      String    // original（纯原题）/ variant（纯变式）/ mixed（混合）
+  status    String    @default("ready") // ready / graded（已录成绩）
+  totalScore Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  questions PaperQuestion[]
+}
+
+model PaperQuestion {
+  id          String        @id @default(cuid())
+  paperId     String
+  paper       PracticePaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+
+  order       Int           // 题号（从 1 开始，按题型分组排序）
+  section     String        // 大题组：choice / fill / judge / solve
+  questionType String
+  score       Int           // 分值
+  isVariant   Boolean       // 变式题 or 原题
+  sourceErrorItemId String? // 关联原错题（用于成绩回写）
+
+  // 题目快照
+  questionText     String
+  answerText       String
+  analysis         String
+  knowledgePoints  String?  // JSON 数组
+  originalImageUrl String?  // 原题图片（原题模式展示）
+
+  // 作答结果（录成绩后回填）
+  isCorrect    Boolean?
 }
