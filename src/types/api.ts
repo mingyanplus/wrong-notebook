@@ -126,6 +126,14 @@ export interface AppConfig {
         baseUrl?: string;
         model?: string;
     };
+    /** 思考预算（Gemini thinkingBudget）：0=关闭，未设置=模型默认动态思考 */
+    thinking?: {
+        analyze?: number;
+        similar?: number;
+        reanswer?: number;
+        geogebra?: number;
+        backfill?: number;
+    };
     azure?: {
         apiKey?: string;
         endpoint?: string;       // Azure 资源端点 (https://xxx.openai.azure.com)

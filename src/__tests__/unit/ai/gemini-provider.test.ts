@@ -39,6 +39,7 @@ vi.mock('@/lib/config', () => ({
             model: 'gemini-2.0-flash',
         },
     })),
+    getThinkingBudget: vi.fn(() => undefined),
 }));
 
 // Mock tag service

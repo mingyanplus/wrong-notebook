@@ -1085,6 +1085,48 @@ export function SettingsDialog() {
                                             currentModel={config.gemini?.model}
                                             onModelChange={(model) => updateConfig('gemini', 'model', model)}
                                         />
+                                        <div className="space-y-3 rounded-md border p-3">
+                                            <div>
+                                                <Label>{t.settings?.ai?.thinking?.title || "思考等级（按任务）"}</Label>
+                                                <p className="text-xs text-muted-foreground mt-1">
+                                                    {t.settings?.ai?.thinking?.hint || "控制模型解题前的思考量：关闭最快，越高质量越好但更慢更贵。批量补全建议设低。"}
+                                                </p>
+                                            </div>
+                                            {([
+                                                { key: 'analyze', label: t.settings?.ai?.thinking?.analyze || "错题解析" },
+                                                { key: 'similar', label: t.settings?.ai?.thinking?.similar || "举一反三 / 组卷" },
+                                                { key: 'reanswer', label: t.settings?.ai?.thinking?.reanswer || "重新解题" },
+                                                { key: 'geogebra', label: t.settings?.ai?.thinking?.geogebra || "GeoGebra 演示" },
+                                                { key: 'backfill', label: t.settings?.ai?.thinking?.backfill || "批量补全" },
+                                            ] as Array<{ key: 'analyze' | 'similar' | 'reanswer' | 'geogebra' | 'backfill'; label: string }>).map(({ key, label }) => (
+                                                <div key={key} className="flex items-center gap-3">
+                                                    <span className="w-28 shrink-0 text-sm text-muted-foreground">{label}</span>
+                                                    <Select
+                                                        value={config.thinking?.[key] !== undefined ? String(config.thinking[key]) : 'default'}
+                                                        onValueChange={(val) => {
+                                                            setConfig(prev => {
+                                                                const thinking = { ...prev.thinking };
+                                                                if (val === 'default') {
+                                                                    delete thinking[key];
+                                                                } else {
+                                                                    thinking[key] = Number(val);
+                                                                }
+                                                                return { ...prev, thinking };
+                                                            });
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="default">{t.settings?.ai?.thinking?.levelDefault || "模型默认（动态）"}</SelectItem>
+                                                            <SelectItem value="0">{t.settings?.ai?.thinking?.levelOff || "关闭（最快）"}</SelectItem>
+                                                            <SelectItem value="2048">{t.settings?.ai?.thinking?.levelLow || "低（约 2K tokens）"}</SelectItem>
+                                                            <SelectItem value="8192">{t.settings?.ai?.thinking?.levelMedium || "中（约 8K tokens）"}</SelectItem>
+                                                            <SelectItem value="24576">{t.settings?.ai?.thinking?.levelHigh || "高（约 24K tokens）"}</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 )}
 

@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
 import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
 import { safeParseParsedQuestion, parseBackfillResponse } from './schema';
-import { getAppConfig } from '../config';
+import { getAppConfig, getThinkingBudget, type ThinkingTask } from '../config';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
 import { normalizeMistakeStatusForSave } from '../mistake-status';
@@ -84,6 +84,13 @@ export class GeminiProvider implements AIService {
             }
         }
         throw lastError;
+    }
+
+
+    /** 按任务构造含思考预算的 generateContent 参数（未配置时省略 = 模型默认动态思考） */
+    private genContentOptions(task: ThinkingTask) {
+        const budget = getThinkingBudget(task);
+        return budget !== undefined ? { config: { thinkingConfig: { thinkingBudget: budget } } } : {};
     }
 
     private extractTag(text: string, tagName: string): string | null {
@@ -216,6 +223,7 @@ export class GeminiProvider implements AIService {
 
             const response = await this.retryOperation(() => this.ai.models.generateContent({
                 model: this.modelName,
+                ...this.genContentOptions('analyze'),
                 contents: [
                     {
                         text: prompt
@@ -273,6 +281,7 @@ export class GeminiProvider implements AIService {
         try {
             const response = await this.retryOperation(() => this.ai.models.generateContent({
                 model: this.modelName,
+                ...this.genContentOptions('similar'),
                 contents: prompt
             }));
 
@@ -326,6 +335,7 @@ export class GeminiProvider implements AIService {
 
             const response = await this.retryOperation(() => this.ai.models.generateContent({
                 model: this.modelName,
+                ...this.genContentOptions('reanswer'),
                 contents
             }));
 
@@ -370,6 +380,7 @@ export class GeminiProvider implements AIService {
         try {
             const response = await this.retryOperation(() => this.ai.models.generateContent({
                 model: this.modelName,
+                ...this.genContentOptions('geogebra'),
                 contents: prompt
             }));
 
@@ -411,6 +422,7 @@ export class GeminiProvider implements AIService {
 
         const response = await this.retryOperation(() => this.ai.models.generateContent({
             model: this.modelName,
+            ...this.genContentOptions('backfill'),
             contents: prompt
         }));
         const text = response.text || '';

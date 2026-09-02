@@ -203,4 +203,46 @@ describe('config module', () => {
             expect(result.allowRegistration).toBe(false);
         });
     });
+
+    describe('getThinkingBudget', () => {
+        it('未配置时返回 undefined（模型默认动态思考）', async () => {
+            vi.mocked(fs.existsSync).mockReturnValue(false);
+            const { getThinkingBudget } = await import('@/lib/config');
+            expect(getThinkingBudget('analyze')).toBeUndefined();
+            expect(getThinkingBudget('backfill')).toBeUndefined();
+        });
+
+        it('0（关闭思考）是合法值，应原样返回', async () => {
+            vi.mocked(fs.existsSync).mockReturnValue(true);
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+                aiProvider: 'gemini',
+                thinking: { backfill: 0 },
+            }));
+            const { getThinkingBudget } = await import('@/lib/config');
+            expect(getThinkingBudget('backfill')).toBe(0);
+            expect(getThinkingBudget('analyze')).toBeUndefined();
+        });
+
+        it('配置的预算值按任务返回', async () => {
+            vi.mocked(fs.existsSync).mockReturnValue(true);
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+                aiProvider: 'gemini',
+                thinking: { analyze: 2048, similar: 8192 },
+            }));
+            const { getThinkingBudget } = await import('@/lib/config');
+            expect(getThinkingBudget('analyze')).toBe(2048);
+            expect(getThinkingBudget('similar')).toBe(8192);
+        });
+
+        it('非法值（负数/字符串）返回 undefined', async () => {
+            vi.mocked(fs.existsSync).mockReturnValue(true);
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+                aiProvider: 'gemini',
+                thinking: { analyze: -1, reanswer: 'high' },
+            }));
+            const { getThinkingBudget } = await import('@/lib/config');
+            expect(getThinkingBudget('analyze')).toBeUndefined();
+            expect(getThinkingBudget('reanswer')).toBeUndefined();
+        });
+    });
 });

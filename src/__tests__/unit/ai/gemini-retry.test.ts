@@ -25,6 +25,7 @@ vi.mock('@/lib/config', () => ({
     getAppConfig: vi.fn(() => ({
         prompts: {},
     })),
+    getThinkingBudget: vi.fn(() => undefined),
 }));
 
 vi.mock('@/lib/ai/schema', () => ({

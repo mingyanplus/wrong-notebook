@@ -51,7 +51,7 @@ Next.js 16 (App Router) + React 19 + TypeScript (strict) + Tailwind CSS v4 + Sha
 
 ### AI 服务抽象（src/lib/ai/）
 
-工厂模式：`getAIService()` 每次调用都重新读取配置并返回 `GeminiProvider` / `OpenAIProvider` / `AzureOpenAIProvider`，三者实现统一的 `AIService` 接口（`types.ts`）。AI 返回值经 `schema.ts` 的 Zod 校验；提示词模板在 `prompts.ts`，使用 **XML 标签格式输出（非 JSON）** 以减少格式错误，且可被 `app-config.json` 中的自定义模板覆盖。
+工厂模式：`getAIService()` 每次调用都重新读取配置并返回 `GeminiProvider` / `OpenAIProvider` / `AzureOpenAIProvider`，三者实现统一的 `AIService` 接口（`types.ts`）。AI 返回值经 `schema.ts` 的 Zod 校验；提示词模板在 `prompts.ts`，使用 **XML 标签格式输出（非 JSON）** 以减少格式错误，且可被 `app-config.json` 中的自定义模板覆盖。Gemini 支持按任务设置思考预算（`config.thinking`，见 `getThinkingBudget()`，五种任务：解析/变式/重解/GeoGebra/批量补全；未设置=模型默认动态思考，仅 Gemini 生效）。
 
 ### 配置优先级（src/lib/config.ts）
 

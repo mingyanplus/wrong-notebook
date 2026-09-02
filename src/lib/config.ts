@@ -41,6 +41,26 @@ export interface AppConfig {
     timeouts?: {
         analyze?: number; // 毫秒
     };
+    /**
+     * 思考预算（Gemini thinkingBudget，token 数），按生成任务分别设置。
+     * 0 = 关闭思考（最快）；未设置 = 模型默认（动态思考）。
+     * 目前仅 Gemini 提供商生效；OpenAI/Azure 模型对 reasoning 参数支持不一，暂不透传。
+     */
+    thinking?: {
+        analyze?: number;   // 错题解析（图片识别 + 解析 + 错因判定）
+        similar?: number;   // 举一反三 / 智能组卷变式题
+        reanswer?: number;  // 重新解题
+        geogebra?: number;  // GeoGebra 演示命令生成
+        backfill?: number;  // 批量补全标签/题型/错因
+    };
+}
+
+export type ThinkingTask = 'analyze' | 'similar' | 'reanswer' | 'geogebra' | 'backfill';
+
+/** 读取指定任务的思考预算；未配置或非法值返回 undefined（= 模型默认动态思考） */
+export function getThinkingBudget(task: ThinkingTask): number | undefined {
+    const v = getAppConfig().thinking?.[task];
+    return typeof v === 'number' && v >= 0 ? v : undefined;
 }
 
 // 旧版 OpenAI 配置格式（用于迁移检测）
