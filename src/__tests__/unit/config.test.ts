@@ -204,45 +204,50 @@ describe('config module', () => {
         });
     });
 
-    describe('getThinkingBudget', () => {
-        it('未配置时返回 undefined（模型默认动态思考）', async () => {
+    describe('getThinkingLevel', () => {
+        it('未配置时返回 undefined（模型默认）', async () => {
             vi.mocked(fs.existsSync).mockReturnValue(false);
-            const { getThinkingBudget } = await import('@/lib/config');
-            expect(getThinkingBudget('analyze')).toBeUndefined();
-            expect(getThinkingBudget('backfill')).toBeUndefined();
+            const { getThinkingLevel } = await import('@/lib/config');
+            expect(getThinkingLevel('analyze')).toBeUndefined();
+            expect(getThinkingLevel('backfill')).toBeUndefined();
         });
 
-        it('0（关闭思考）是合法值，应原样返回', async () => {
+        it('档位字符串原样返回，按任务独立读取', async () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
                 aiProvider: 'gemini',
-                thinking: { backfill: 0 },
+                thinking: { analyze: 'low', similar: 'max', backfill: 'off' },
             }));
-            const { getThinkingBudget } = await import('@/lib/config');
-            expect(getThinkingBudget('backfill')).toBe(0);
-            expect(getThinkingBudget('analyze')).toBeUndefined();
+            const { getThinkingLevel } = await import('@/lib/config');
+            expect(getThinkingLevel('analyze')).toBe('low');
+            expect(getThinkingLevel('similar')).toBe('max');
+            expect(getThinkingLevel('backfill')).toBe('off');
+            expect(getThinkingLevel('reanswer')).toBeUndefined();
         });
 
-        it('配置的预算值按任务返回', async () => {
+        it('兼容旧版数值配置，就近归一为档位', async () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
                 aiProvider: 'gemini',
-                thinking: { analyze: 2048, similar: 8192 },
+                thinking: { analyze: 0, similar: 2048, reanswer: 8192, geogebra: 16384, backfill: 24576 },
             }));
-            const { getThinkingBudget } = await import('@/lib/config');
-            expect(getThinkingBudget('analyze')).toBe(2048);
-            expect(getThinkingBudget('similar')).toBe(8192);
+            const { getThinkingLevel } = await import('@/lib/config');
+            expect(getThinkingLevel('analyze')).toBe('off');
+            expect(getThinkingLevel('similar')).toBe('low');
+            expect(getThinkingLevel('reanswer')).toBe('medium');
+            expect(getThinkingLevel('geogebra')).toBe('high');
+            expect(getThinkingLevel('backfill')).toBe('max');
         });
 
-        it('非法值（负数/字符串）返回 undefined', async () => {
+        it('非法值返回 undefined', async () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
                 aiProvider: 'gemini',
-                thinking: { analyze: -1, reanswer: 'high' },
+                thinking: { analyze: 'ultra', reanswer: -1 },
             }));
-            const { getThinkingBudget } = await import('@/lib/config');
-            expect(getThinkingBudget('analyze')).toBeUndefined();
-            expect(getThinkingBudget('reanswer')).toBeUndefined();
+            const { getThinkingLevel } = await import('@/lib/config');
+            expect(getThinkingLevel('analyze')).toBeUndefined();
+            expect(getThinkingLevel('reanswer')).toBeUndefined();
         });
     });
 });

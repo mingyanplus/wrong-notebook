@@ -43,6 +43,7 @@ vi.mock('@/lib/config', () => ({
             apiVersion: '2024-02-15-preview',
         },
     })),
+    getThinkingLevel: vi.fn(() => undefined),
 }));
 
 // Mock tag service

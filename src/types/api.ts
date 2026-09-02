@@ -126,13 +126,13 @@ export interface AppConfig {
         baseUrl?: string;
         model?: string;
     };
-    /** 思考预算（Gemini thinkingBudget）：0=关闭，未设置=模型默认动态思考 */
+    /** 思考等级（通用档位 off/low/medium/high/max）：未设置=模型默认 */
     thinking?: {
-        analyze?: number;
-        similar?: number;
-        reanswer?: number;
-        geogebra?: number;
-        backfill?: number;
+        analyze?: string;
+        similar?: string;
+        reanswer?: string;
+        geogebra?: string;
+        backfill?: string;
     };
     azure?: {
         apiKey?: string;

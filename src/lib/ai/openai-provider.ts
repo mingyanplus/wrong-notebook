@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
 import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
-import { getAppConfig } from '../config';
+import { getAppConfig, getThinkingLevel, type ThinkingTask } from '../config';
 import { safeParseParsedQuestion, parseBackfillResponse } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
@@ -70,6 +70,14 @@ export class OpenAIProvider implements AIService {
             }
             return msg;
         });
+    }
+
+    /** 档位 → reasoning_effort（off→minimal；max 透传给支持该档的兼容端点；未配置不传 = 模型默认） */
+    private genEffortOptions(task: ThinkingTask): { reasoning_effort?: "minimal" | "low" | "medium" | "high" } {
+        const level = getThinkingLevel(task);
+        if (level === undefined) return {};
+        // 'max' 为部分兼容端点的扩展档位，SDK 类型不认但运行时透传
+        return { reasoning_effort: (level === 'off' ? 'minimal' : level) as "minimal" | "low" | "medium" | "high" };
     }
 
     private extractTag(text: string, tagName: string): string | null {
@@ -267,6 +275,7 @@ export class OpenAIProvider implements AIService {
             } else {
                 response = await this.openai.chat.completions.create({
                     model: this.model,
+                ...this.genEffortOptions('analyze'),
                     messages: [
                         {
                             role: "system",
@@ -340,6 +349,7 @@ export class OpenAIProvider implements AIService {
         try {
             const response = await this.openai.chat.completions.create({
                 model: this.model,
+                ...this.genEffortOptions('similar'),
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt },
@@ -411,6 +421,7 @@ export class OpenAIProvider implements AIService {
 
             const response = await this.openai.chat.completions.create({
                 model: this.model,
+                ...this.genEffortOptions('reanswer'),
                 messages: [
                     { role: "system", content: prompt },
                     { role: "user", content: userContent }
@@ -467,6 +478,7 @@ export class OpenAIProvider implements AIService {
         try {
             const response = await this.openai.chat.completions.create({
                 model: this.model,
+                ...this.genEffortOptions('geogebra'),
                 messages: [
                     { role: "system", content: prompt },
                     { role: "user", content: "请分析上述题目并生成 GeoGebra 演示命令。" }
@@ -512,6 +524,7 @@ export class OpenAIProvider implements AIService {
 
         const response = await this.openai.chat.completions.create({
             model: this.model,
+                ...this.genEffortOptions('backfill'),
             messages: [{ role: "user", content: prompt }],
         });
         const text = response.choices[0]?.message?.content || '';

@@ -42,25 +42,43 @@ export interface AppConfig {
         analyze?: number; // 毫秒
     };
     /**
-     * 思考预算（Gemini thinkingBudget，token 数），按生成任务分别设置。
-     * 0 = 关闭思考（最快）；未设置 = 模型默认（动态思考）。
-     * 目前仅 Gemini 提供商生效；OpenAI/Azure 模型对 reasoning 参数支持不一，暂不透传。
+     * 思考等级（按生成任务分别设置），跨提供商通用档位。
+     * 'off' = 关闭思考（最快）；未设置 = 模型默认。
+     * Gemini：映射为 thinkingBudget token 数（off=0 / low≈2K / medium≈8K / high≈16K / max≈24K）
+     * OpenAI/Azure：透传 reasoning_effort（off→minimal；max 适用于支持该档的兼容端点）
      */
     thinking?: {
-        analyze?: number;   // 错题解析（图片识别 + 解析 + 错因判定）
-        similar?: number;   // 举一反三 / 智能组卷变式题
-        reanswer?: number;  // 重新解题
-        geogebra?: number;  // GeoGebra 演示命令生成
-        backfill?: number;  // 批量补全标签/题型/错因
+        analyze?: ThinkingLevel;   // 错题解析（图片识别 + 解析 + 错因判定）
+        similar?: ThinkingLevel;   // 举一反三 / 智能组卷变式题
+        reanswer?: ThinkingLevel;  // 重新解题
+        geogebra?: ThinkingLevel;  // GeoGebra 演示命令生成
+        backfill?: ThinkingLevel;  // 批量补全标签/题型/错因
     };
 }
 
 export type ThinkingTask = 'analyze' | 'similar' | 'reanswer' | 'geogebra' | 'backfill';
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 
-/** 读取指定任务的思考预算；未配置或非法值返回 undefined（= 模型默认动态思考） */
-export function getThinkingBudget(task: ThinkingTask): number | undefined {
-    const v = getAppConfig().thinking?.[task];
-    return typeof v === 'number' && v >= 0 ? v : undefined;
+const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
+
+/**
+ * 读取指定任务的思考等级；未配置或非法值返回 undefined（= 模型默认）。
+ * 兼容旧版数值配置（thinkingBudget token 数），就近归一为档位。
+ */
+export function getThinkingLevel(task: ThinkingTask): ThinkingLevel | undefined {
+    const raw: unknown = getAppConfig().thinking?.[task];
+    if (typeof raw === 'string' && (THINKING_LEVELS as readonly string[]).includes(raw)) {
+        return raw as ThinkingLevel;
+    }
+    // 旧版数值兼容：0→off，≤2048→low，≤8192→medium，≤16384→high，>16384→max
+    if (typeof raw === 'number' && raw >= 0) {
+        if (raw === 0) return 'off';
+        if (raw <= 2048) return 'low';
+        if (raw <= 8192) return 'medium';
+        if (raw <= 16384) return 'high';
+        return 'max';
+    }
+    return undefined;
 }
 
 // 旧版 OpenAI 配置格式（用于迁移检测）

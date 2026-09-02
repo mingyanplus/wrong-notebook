@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
 import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
 import { safeParseParsedQuestion, parseBackfillResponse } from './schema';
-import { getAppConfig, getThinkingBudget, type ThinkingTask } from '../config';
+import { getAppConfig, getThinkingLevel, type ThinkingTask, type ThinkingLevel } from '../config';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
 import { normalizeMistakeStatusForSave } from '../mistake-status';
@@ -87,10 +87,17 @@ export class GeminiProvider implements AIService {
     }
 
 
+    /** 档位 → Gemini thinkingBudget token 数 */
+    private static readonly LEVEL_TO_BUDGET: Record<ThinkingLevel, number> = {
+        off: 0, low: 2048, medium: 8192, high: 16384, max: 24576,
+    };
+
     /** 按任务构造含思考预算的 generateContent 参数（未配置时省略 = 模型默认动态思考） */
     private genContentOptions(task: ThinkingTask) {
-        const budget = getThinkingBudget(task);
-        return budget !== undefined ? { config: { thinkingConfig: { thinkingBudget: budget } } } : {};
+        const level = getThinkingLevel(task);
+        return level !== undefined
+            ? { config: { thinkingConfig: { thinkingBudget: GeminiProvider.LEVEL_TO_BUDGET[level] } } }
+            : {};
     }
 
     private extractTag(text: string, tagName: string): string | null {

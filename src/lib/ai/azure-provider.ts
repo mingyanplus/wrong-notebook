@@ -1,7 +1,7 @@
 import { AzureOpenAI } from "openai";
 import { AIService, ParsedQuestion, DifficultyLevel, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
 import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateReanswerPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
-import { getAppConfig } from '../config';
+import { getAppConfig, getThinkingLevel, type ThinkingTask } from '../config';
 import { safeParseParsedQuestion, parseBackfillResponse } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
@@ -65,6 +65,14 @@ export class AzureOpenAIProvider implements AIService {
             endpoint: endpoint,
             apiKeyPrefix: apiKey.substring(0, 8) + '...'
         }, 'Azure AI Provider initialized');
+    }
+
+    /** 档位 → reasoning_effort（off→minimal；max 透传给支持该档的兼容端点；未配置不传 = 模型默认） */
+    private genEffortOptions(task: ThinkingTask): { reasoning_effort?: "minimal" | "low" | "medium" | "high" } {
+        const level = getThinkingLevel(task);
+        if (level === undefined) return {};
+        // 'max' 为部分兼容端点的扩展档位，SDK 类型不认但运行时透传
+        return { reasoning_effort: (level === 'off' ? 'minimal' : level) as "minimal" | "low" | "medium" | "high" };
     }
 
     private extractTag(text: string, tagName: string): string | null {
@@ -188,6 +196,7 @@ export class AzureOpenAIProvider implements AIService {
         try {
             const response = await this.client.chat.completions.create({
                 model: this.deployment,
+                ...this.genEffortOptions('analyze'),
                 messages: [
                     {
                         role: "system",
@@ -270,6 +279,7 @@ Knowledge Points: ${knowledgePoints.join(", ")}
         try {
             const response = await this.client.chat.completions.create({
                 model: this.deployment,
+                ...this.genEffortOptions('similar'),
                 messages: [
                     {
                         role: "system",
@@ -341,6 +351,7 @@ Knowledge Points: ${knowledgePoints.join(", ")}
 
             const response = await this.client.chat.completions.create({
                 model: this.deployment,
+                ...this.genEffortOptions('reanswer'),
                 messages: [
                     { role: "system", content: prompt },
                     { role: "user", content: userContent }
@@ -398,6 +409,7 @@ Knowledge Points: ${knowledgePoints.join(", ")}
         try {
             const response = await this.client.chat.completions.create({
                 model: this.deployment,
+                ...this.genEffortOptions('geogebra'),
                 messages: [
                     { role: "system", content: prompt },
                     { role: "user", content: "请分析上述题目并生成 GeoGebra 演示命令。" }
@@ -443,6 +455,7 @@ Knowledge Points: ${knowledgePoints.join(", ")}
 
         const response = await this.client.chat.completions.create({
             model: this.deployment,
+                ...this.genEffortOptions('backfill'),
             messages: [{ role: "user", content: prompt }],
         });
         const text = response.choices[0]?.message?.content || '';

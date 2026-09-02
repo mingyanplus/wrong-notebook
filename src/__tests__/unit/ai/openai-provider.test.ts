@@ -41,6 +41,7 @@ vi.mock('@/lib/config', () => ({
             model: 'gpt-4o',
         },
     })),
+    getThinkingLevel: vi.fn(() => undefined),
 }));
 
 // Mock tag service
