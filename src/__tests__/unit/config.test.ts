@@ -205,24 +205,38 @@ describe('config module', () => {
     });
 
     describe('getThinkingLevel', () => {
-        it('未配置时返回 undefined（模型默认）', async () => {
+        it('未配置时返回推荐档位（DEFAULT_CONFIG）', async () => {
             vi.mocked(fs.existsSync).mockReturnValue(false);
             const { getThinkingLevel } = await import('@/lib/config');
-            expect(getThinkingLevel('analyze')).toBeUndefined();
-            expect(getThinkingLevel('backfill')).toBeUndefined();
+            expect(getThinkingLevel('analyze')).toBe('high');
+            expect(getThinkingLevel('similar')).toBe('high');
+            expect(getThinkingLevel('reanswer')).toBe('medium');
+            expect(getThinkingLevel('geogebra')).toBe('low');
+            expect(getThinkingLevel('backfill')).toBe('low');
         });
 
-        it('档位字符串原样返回，按任务独立读取', async () => {
+        it('用户配置按任务覆盖推荐档位', async () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
                 aiProvider: 'gemini',
-                thinking: { analyze: 'low', similar: 'max', backfill: 'off' },
+                thinking: { analyze: 'max', backfill: 'off' },
             }));
             const { getThinkingLevel } = await import('@/lib/config');
-            expect(getThinkingLevel('analyze')).toBe('low');
-            expect(getThinkingLevel('similar')).toBe('max');
+            expect(getThinkingLevel('analyze')).toBe('max');
             expect(getThinkingLevel('backfill')).toBe('off');
-            expect(getThinkingLevel('reanswer')).toBeUndefined();
+            // 未覆盖的任务继承推荐档位（深合并）
+            expect(getThinkingLevel('similar')).toBe('high');
+            expect(getThinkingLevel('reanswer')).toBe('medium');
+        });
+
+        it('显式选择 default 返回 undefined（不传思考参数）', async () => {
+            vi.mocked(fs.existsSync).mockReturnValue(true);
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
+                aiProvider: 'gemini',
+                thinking: { analyze: 'default' },
+            }));
+            const { getThinkingLevel } = await import('@/lib/config');
+            expect(getThinkingLevel('analyze')).toBeUndefined();
         });
 
         it('兼容旧版数值配置，就近归一为档位', async () => {

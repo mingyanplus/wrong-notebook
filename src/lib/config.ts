@@ -67,6 +67,7 @@ const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'low', 'medium', 'high
  */
 export function getThinkingLevel(task: ThinkingTask): ThinkingLevel | undefined {
     const raw: unknown = getAppConfig().thinking?.[task];
+    if (raw === 'default') return undefined; // 显式选择"模型默认"：不传任何思考参数
     if (typeof raw === 'string' && (THINKING_LEVELS as readonly string[]).includes(raw)) {
         return raw as ThinkingLevel;
     }
@@ -157,6 +158,14 @@ const DEFAULT_CONFIG: AppConfig = {
     timeouts: {
         analyze: 180000,
     },
+    // 推荐档位：解析/变式质量优先，轻量任务省时省钱；显式选 'default' 可恢复模型默认
+    thinking: {
+        analyze: 'high',
+        similar: 'high',
+        reanswer: 'medium',
+        geogebra: 'low',
+        backfill: 'low',
+    },
 };
 
 export function getAppConfig(): AppConfig {
@@ -191,6 +200,7 @@ export function getAppConfig(): AppConfig {
                 azure: { ...DEFAULT_CONFIG.azure, ...userConfig.azure },
                 prompts: { ...DEFAULT_CONFIG.prompts, ...userConfig.prompts },
                 timeouts: { ...DEFAULT_CONFIG.timeouts, ...userConfig.timeouts },
+                thinking: { ...DEFAULT_CONFIG.thinking, ...userConfig.thinking },
             };
         } catch (error) {
             logger.error({ error }, 'Failed to read config file');
@@ -212,6 +222,7 @@ export function updateAppConfig(newConfig: Partial<AppConfig>) {
         gemini: { ...currentConfig.gemini, ...newConfig.gemini },
         azure: { ...currentConfig.azure, ...newConfig.azure },
         prompts: { ...currentConfig.prompts, ...newConfig.prompts },
+        thinking: { ...currentConfig.thinking, ...newConfig.thinking },
         timeouts: { ...currentConfig.timeouts, ...newConfig.timeouts },
     };
 

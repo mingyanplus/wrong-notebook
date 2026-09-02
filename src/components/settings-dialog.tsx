@@ -1130,51 +1130,6 @@ export function SettingsDialog() {
                                                     ) : (
                                                         <Eye className="h-4 w-4 text-muted-foreground" />
                                                     )}
-
-                                {/* 思考等级：跨提供商通用，按任务独立设置 */}
-                                <div className="space-y-3 rounded-md border p-3">
-                                    <div>
-                                        <Label>{t.settings?.ai?.thinking?.title || "思考等级（按任务）"}</Label>
-                                        <p className="text-xs text-muted-foreground mt-1">
-                                            {t.settings?.ai?.thinking?.hint || "控制模型解题前的思考量：关闭最快，档位越高质量越好但更慢更贵。批量补全建议设低。Gemini 映射为思考预算 token 数；OpenAI/Azure 透传 reasoning_effort（max 档需端点支持）。"}
-                                        </p>
-                                    </div>
-                                    {([
-                                        { key: 'analyze', label: t.settings?.ai?.thinking?.analyze || "错题解析" },
-                                        { key: 'similar', label: t.settings?.ai?.thinking?.similar || "举一反三 / 组卷" },
-                                        { key: 'reanswer', label: t.settings?.ai?.thinking?.reanswer || "重新解题" },
-                                        { key: 'geogebra', label: t.settings?.ai?.thinking?.geogebra || "GeoGebra 演示" },
-                                        { key: 'backfill', label: t.settings?.ai?.thinking?.backfill || "批量补全" },
-                                    ] as Array<{ key: 'analyze' | 'similar' | 'reanswer' | 'geogebra' | 'backfill'; label: string }>).map(({ key, label }) => (
-                                        <div key={key} className="flex items-center gap-3">
-                                            <span className="w-28 shrink-0 text-sm text-muted-foreground">{label}</span>
-                                            <Select
-                                                value={config.thinking?.[key] || 'default'}
-                                                onValueChange={(val) => {
-                                                    setConfig(prev => {
-                                                        const thinking = { ...prev.thinking };
-                                                        if (val === 'default') {
-                                                            delete thinking[key];
-                                                        } else {
-                                                            thinking[key] = val;
-                                                        }
-                                                        return { ...prev, thinking };
-                                                    });
-                                                }}
-                                            >
-                                                <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="default">{t.settings?.ai?.thinking?.levelDefault || "模型默认"}</SelectItem>
-                                                    <SelectItem value="off">{t.settings?.ai?.thinking?.levelOff || "关闭（最快）"}</SelectItem>
-                                                    <SelectItem value="low">{t.settings?.ai?.thinking?.levelLow || "低"}</SelectItem>
-                                                    <SelectItem value="medium">{t.settings?.ai?.thinking?.levelMedium || "中"}</SelectItem>
-                                                    <SelectItem value="high">{t.settings?.ai?.thinking?.levelHigh || "高"}</SelectItem>
-                                                    <SelectItem value="max">{t.settings?.ai?.thinking?.levelMax || "最高（需端点支持）"}</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    ))}
-                                </div>
                                                 </Button>
                                             </div>
                                         </div>
@@ -1196,6 +1151,47 @@ export function SettingsDialog() {
                                         </div>
                                     </div>
                                 )}
+
+
+                                {/* 思考等级：跨提供商通用，按任务独立设置 */}
+                                <div className="space-y-3 rounded-md border p-3">
+                                    <div>
+                                        <Label>{t.settings?.ai?.thinking?.title || "思考等级（按任务）"}</Label>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            {t.settings?.ai?.thinking?.hint || "控制模型解题前的思考量：关闭最快，档位越高质量越好但更慢更贵。批量补全建议设低。Gemini 映射为思考预算 token 数；OpenAI/Azure 透传 reasoning_effort（max 档需端点支持）。"}
+                                        </p>
+                                    </div>
+                                    {([
+                                        { key: 'analyze', label: t.settings?.ai?.thinking?.analyze || "错题解析" },
+                                        { key: 'similar', label: t.settings?.ai?.thinking?.similar || "举一反三 / 组卷" },
+                                        { key: 'reanswer', label: t.settings?.ai?.thinking?.reanswer || "重新解题" },
+                                        { key: 'geogebra', label: t.settings?.ai?.thinking?.geogebra || "GeoGebra 演示" },
+                                        { key: 'backfill', label: t.settings?.ai?.thinking?.backfill || "批量补全" },
+                                    ] as Array<{ key: 'analyze' | 'similar' | 'reanswer' | 'geogebra' | 'backfill'; label: string }>).map(({ key, label }) => (
+                                        <div key={key} className="flex items-center gap-3">
+                                            <span className="w-28 shrink-0 text-sm text-muted-foreground">{label}</span>
+                                            <Select
+                                                value={config.thinking?.[key] || 'default'}
+                                                onValueChange={(val) => {
+                                                    setConfig(prev => ({
+                                                        ...prev,
+                                                        thinking: { ...prev.thinking, [key]: val },
+                                                    }));
+                                                }}
+                                            >
+                                                <SelectTrigger className="flex-1"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="default">{t.settings?.ai?.thinking?.levelDefault || "模型默认"}</SelectItem>
+                                                    <SelectItem value="off">{t.settings?.ai?.thinking?.levelOff || "关闭（最快）"}</SelectItem>
+                                                    <SelectItem value="low">{t.settings?.ai?.thinking?.levelLow || "低"}</SelectItem>
+                                                    <SelectItem value="medium">{t.settings?.ai?.thinking?.levelMedium || "中"}</SelectItem>
+                                                    <SelectItem value="high">{t.settings?.ai?.thinking?.levelHigh || "高"}</SelectItem>
+                                                    <SelectItem value="max">{t.settings?.ai?.thinking?.levelMax || "最高（需端点支持）"}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    ))}
+                                </div>
                                 {/* 测试连接和保存按钮 */}
                                 <div className="space-y-3 pt-3 border-t">
                                     <div className="flex gap-2">
