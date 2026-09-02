@@ -20,7 +20,7 @@ version: '3'
 
 services:
   wrong-notebook:
-    image: ghcr.io/wttwins/wrong-notebook:latest
+    image: ghcr.io/mingyanplus/wrong-notebook:latest
     container_name: wrong-notebook
     restart: always
     ports:

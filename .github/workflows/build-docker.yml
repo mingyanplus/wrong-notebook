@@ -1,6 +1,9 @@
 name: Manual Docker Build & Publish
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
