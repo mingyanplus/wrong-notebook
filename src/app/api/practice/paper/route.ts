@@ -8,6 +8,7 @@ import { getAIService } from "@/lib/ai";
 import { QUESTION_TYPES, getErrorCategoryLabel } from "@/lib/error-categories";
 import { categoryWeight, recencyFactor } from "@/lib/weakness";
 import { WEAKNESS_CONFIG } from "@/lib/weakness-config";
+import { buildPaperPlan } from "@/lib/paper-plan";
 import type { Prisma } from "@prisma/client";
 
 type ItemWithRels = Prisma.ErrorItemGetPayload<{ include: { tags: true; subject: true } }>;
@@ -90,24 +91,22 @@ export async function POST(req: Request) {
             return badRequest("No eligible error items to build a paper");
         }
 
-        // ── 分配原题/变式 ──────────────────────────────────
-        const needVariant: Set<string> = new Set();
-        if (mode === "variant") {
-            items.forEach((i) => needVariant.add(i.id));
-        } else if (mode === "mixed") {
-            const variantTotal = Math.round(items.length * variantRatio);
-            // 薄弱度高（排前面）的优先出变式
-            items.slice(0, variantTotal).forEach((i) => needVariant.add(i.id));
-        }
+        // ── 出题计划：count 为试卷目标题数，池不足时循环池用变式补齐 ──
+        const plan = buildPaperPlan(
+            items,
+            mode,
+            count,
+            variantRatio,
+            variantCount,
+            (i) => i.id
+        );
 
         // ── 变式生成（并发池 + 重试 3 次 + 失败降级原题）──────
         const aiService = getAIService();
         const degraded: string[] = [];
-        const variantResults = new Map<string, Array<{ questionText: string; answerText: string; analysis: string; knowledgePoints: string[]; questionType: string }>>();
+        type DraftVariant = { questionText: string; answerText: string; analysis: string; knowledgePoints: string[]; questionType: string };
 
-        async function generateVariantsFor(itemId: string) {
-            const item = items.find((i) => i.id === itemId);
-            if (!item) return;
+        async function generateVariantFor(item: ItemWithRels): Promise<DraftVariant | null> {
 
             const hintParts: string[] = [];
             if (item.errorCategory && item.errorCategory !== "unknown") {
@@ -121,49 +120,43 @@ export async function POST(req: Request) {
                 : "";
 
             const tags = item.tags.map((t) => t.name);
-            const results = [];
-            for (let v = 0; v < (mode === "variant" ? variantCount : 1); v++) {
-                let lastError: unknown = null;
-                let ok = false;
-                for (let attempt = 0; attempt < AI_RETRIES && !ok; attempt++) {
-                    try {
-                        const q = await aiService.generateSimilarQuestion(
-                            item.questionText || "",
-                            tags,
-                            "zh",
-                            body.difficulty ?? "medium",
-                            item.gradeSemester,
-                            mistakeHint
-                        );
-                        results.push({
-                            questionText: q.questionText,
-                            answerText: q.answerText,
-                            analysis: q.analysis,
-                            knowledgePoints: q.knowledgePoints,
-                            questionType: item.questionType || q.questionType || "solve",
-                        });
-                        ok = true;
-                    } catch (error) {
-                        lastError = error;
-                    }
-                }
-                if (!ok) {
-                    logger.warn({ itemId, error: String(lastError) }, 'Variant generation failed after retries');
+            let lastError: unknown = null;
+            for (let attempt = 0; attempt < AI_RETRIES; attempt++) {
+                try {
+                    const q = await aiService.generateSimilarQuestion(
+                        item.questionText || "",
+                        tags,
+                        "zh",
+                        body.difficulty ?? "medium",
+                        item.gradeSemester,
+                        mistakeHint
+                    );
+                    return {
+                        questionText: q.questionText,
+                        answerText: q.answerText,
+                        analysis: q.analysis,
+                        knowledgePoints: q.knowledgePoints,
+                        questionType: item.questionType || q.questionType || "solve",
+                    };
+                } catch (error) {
+                    lastError = error;
                 }
             }
-            if (results.length === 0) {
-                degraded.push(item.id); // 全部失败 → 降级为原题
-            } else {
-                variantResults.set(itemId, results);
-            }
+            logger.warn({ itemId: item.id, error: String(lastError) }, 'Variant generation failed after retries');
+            return null;
         }
 
-        const queue = Array.from(needVariant);
+        // 计划中的变式项并发生成（单题失败 → 降级为原题，不减少题数）
+        const variantByPlanIndex = new Map<number, DraftVariant | null>();
+        let planCursor = 0;
         await Promise.all(
-            Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-                while (queue.length > 0) {
-                    const id = queue.shift();
-                    if (id) await generateVariantsFor(id);
+            Array.from({ length: Math.min(CONCURRENCY, plan.length) }, async () => {
+                while (planCursor < plan.length) {
+                    const idx = planCursor++;
+                    if (!plan[idx].isVariant) continue;
+                    const variant = await generateVariantFor(plan[idx].item);
+                    variantByPlanIndex.set(idx, variant);
+                    if (!variant) degraded.push(plan[idx].item.id);
                 }
             })
         );
@@ -174,39 +167,36 @@ export async function POST(req: Request) {
             sourceErrorItemId: string | null; questionText: string; answerText: string;
             analysis: string; knowledgePoints: string | null; originalImageUrl: string | null;
         }
-        const drafts: DraftQuestion[] = [];
-        for (const item of items) {
-            const variants = variantResults.get(item.id);
-            if (variants && variants.length > 0) {
-                for (const v of variants) {
-                    drafts.push({
-                        section: v.questionType,
-                        questionType: v.questionType,
-                        score: QUESTION_TYPES.find((t) => t.code === v.questionType)?.defaultScore ?? 10,
-                        isVariant: true,
-                        sourceErrorItemId: item.id,
-                        questionText: v.questionText,
-                        answerText: v.answerText,
-                        analysis: v.analysis,
-                        knowledgePoints: JSON.stringify(v.knowledgePoints),
-                        originalImageUrl: null,
-                    });
-                }
-            } else {
-                drafts.push({
-                    section: item.questionType || "solve",
-                    questionType: item.questionType || "solve",
-                    score: QUESTION_TYPES.find((t) => t.code === item.questionType)?.defaultScore ?? 10,
-                    isVariant: false,
+        const drafts: DraftQuestion[] = plan.map(({ item, isVariant }, idx) => {
+            const v = isVariant ? variantByPlanIndex.get(idx) : undefined;
+            if (isVariant && v) {
+                return {
+                    section: v.questionType,
+                    questionType: v.questionType,
+                    score: QUESTION_TYPES.find((t) => t.code === v.questionType)?.defaultScore ?? 10,
+                    isVariant: true,
                     sourceErrorItemId: item.id,
-                    questionText: item.questionText || "",
-                    answerText: item.answerText || "",
-                    analysis: item.analysis || "",
-                    knowledgePoints: JSON.stringify(item.tags.map((t) => t.name)),
-                    originalImageUrl: item.originalImageUrl,
-                });
+                    questionText: v.questionText,
+                    answerText: v.answerText,
+                    analysis: v.analysis,
+                    knowledgePoints: JSON.stringify(v.knowledgePoints),
+                    originalImageUrl: null,
+                };
             }
-        }
+            // 原题，或变式生成失败后降级为原题
+            return {
+                section: item.questionType || "solve",
+                questionType: item.questionType || "solve",
+                score: QUESTION_TYPES.find((t) => t.code === item.questionType)?.defaultScore ?? 10,
+                isVariant: false,
+                sourceErrorItemId: item.id,
+                questionText: item.questionText || "",
+                answerText: item.answerText || "",
+                analysis: item.analysis || "",
+                knowledgePoints: JSON.stringify(item.tags.map((t) => t.name)),
+                originalImageUrl: item.originalImageUrl,
+            };
+        });
 
         // 大题顺序由 QUESTION_TYPES 定义派生（选择 → 填空 → 判断 → 解答）
         const sectionOrder = QUESTION_TYPES.map((t) => t.code as string);

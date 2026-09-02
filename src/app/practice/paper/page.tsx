@@ -34,7 +34,7 @@ function PaperWizardContent() {
     const [count, setCount] = useState(10);
     const [mode, setMode] = useState<PaperMode>("mixed");
     const [variantRatio, setVariantRatio] = useState(50);
-    const [variantCount, setVariantCount] = useState(1);
+    const [variantCount, setVariantCount] = useState(3);
     const [difficulty, setDifficulty] = useState("medium");
     const [generating, setGenerating] = useState(false);
     const [papers, setPapers] = useState<PaperListItem[]>([]);
@@ -107,7 +107,7 @@ function PaperWizardContent() {
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <label className="text-sm text-muted-foreground">{t.paper?.count || "选题数量"}</label>
+                            <label className="text-sm text-muted-foreground">{t.paper?.count || "试卷题数"}</label>
                             <Input type="number" min={1} max={30} value={count} onChange={(e) => setCount(Math.min(30, Math.max(1, Number(e.target.value) || 1)))} />
                         </div>
                     </div>
@@ -150,18 +150,16 @@ function PaperWizardContent() {
                         </div>
                     )}
 
-                    {mode === "variant" && (
+                    {mode !== "original" && (
                         <div className="space-y-2">
-                            <label className="text-sm text-muted-foreground">{t.paper?.variantCount || "每题变式数"}</label>
+                            <label className="text-sm text-muted-foreground">{t.paper?.variantCount || "单题变式上限"}</label>
                             <Select value={String(variantCount)} onValueChange={(v) => setVariantCount(Number(v))}>
                                 <SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     {[1, 2, 3].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
                                 </SelectContent>
                             </Select>
-                            {variantCount > 1 && (
-                                <p className="text-xs text-amber-600">{t.paper?.variantCountHint || "变式数 &gt; 1 适合精选少量错题强化训练"}</p>
-                            )}
+                            <p className="text-xs text-muted-foreground">{t.paper?.variantCountHint || "错题数量不够凑满试卷时，同一道错题最多出的变式数"}</p>
                         </div>
                     )}
 
