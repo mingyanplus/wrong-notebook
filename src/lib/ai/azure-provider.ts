@@ -10,6 +10,9 @@ import { parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode
 
 const logger = createLogger('ai:azure');
 
+// 思考模型（GLM/DeepSeek-R1 等）的推理 token 也计入 max_tokens，预算不足时正文会被截断为空（content=""，finish_reason=length）
+const MAX_OUTPUT_TOKENS = 32768;
+
 type AzureUserContent = string | Array<
     { type: "text"; text: string } |
     { type: "image_url"; image_url: { url: string } }
@@ -214,7 +217,7 @@ export class AzureOpenAIProvider implements AIService {
                         ],
                     },
                 ],
-                max_tokens: 8192,
+                max_tokens: MAX_OUTPUT_TOKENS,
             });
 
             logger.box('📦 Full API Response', JSON.stringify(response, null, 2));
@@ -229,7 +232,7 @@ export class AzureOpenAIProvider implements AIService {
 
             logger.box('🤖 AI Raw Response', text);
 
-            if (!text) throw new Error("Empty response from AI");
+            if (!text) throw new Error(`Empty response from AI (finish_reason: ${response.choices[0]?.finish_reason ?? 'unknown'})`);
             const parsedResult = this.parseResponse(text);
 
             logger.box('✅ Parsed & Validated Result', JSON.stringify(parsedResult, null, 2));
@@ -290,14 +293,14 @@ Knowledge Points: ${knowledgePoints.join(", ")}
                         content: userPrompt,
                     },
                 ],
-                max_tokens: 8192,
+                max_tokens: MAX_OUTPUT_TOKENS,
             });
 
             const text = response.choices[0]?.message?.content || "";
 
             logger.box('🤖 AI Raw Response', text);
 
-            if (!text) throw new Error("Empty response from AI");
+            if (!text) throw new Error(`Empty response from AI (finish_reason: ${response.choices[0]?.finish_reason ?? 'unknown'})`);
             const parsedResult = this.parseResponse(text);
 
             logger.box('✅ Parsed & Validated Result', JSON.stringify(parsedResult, null, 2));
@@ -356,7 +359,7 @@ Knowledge Points: ${knowledgePoints.join(", ")}
                     { role: "system", content: prompt },
                     { role: "user", content: userContent }
                 ],
-                max_tokens: 8192,
+                max_tokens: MAX_OUTPUT_TOKENS,
             });
 
             logger.debug({ response: JSON.stringify(response) }, 'Full API response');
@@ -371,7 +374,7 @@ Knowledge Points: ${knowledgePoints.join(", ")}
 
             logger.debug({ rawResponse: text }, 'AI raw response');
 
-            if (!text) throw new Error("Empty response from AI");
+            if (!text) throw new Error(`Empty response from AI (finish_reason: ${response.choices[0]?.finish_reason ?? 'unknown'})`);
 
             // 解析响应
             const answerText = this.extractTag(text, "answer_text") || "";
@@ -414,13 +417,13 @@ Knowledge Points: ${knowledgePoints.join(", ")}
                     { role: "system", content: prompt },
                     { role: "user", content: "请分析上述题目并生成 GeoGebra 演示命令。" }
                 ],
-                max_tokens: 4096,
+                max_tokens: MAX_OUTPUT_TOKENS,
             });
 
             const text = response.choices[0]?.message?.content || '';
             logger.debug({ rawResponse: text }, 'GeoGebra AI raw response');
 
-            if (!text) throw new Error("Empty response from AI");
+            if (!text) throw new Error(`Empty response from AI (finish_reason: ${response.choices[0]?.finish_reason ?? 'unknown'})`);
 
             // Extract JSON from response (handle possible markdown code blocks)
             let jsonStr = text.trim();
@@ -459,7 +462,7 @@ Knowledge Points: ${knowledgePoints.join(", ")}
             messages: [{ role: "user", content: prompt }],
         });
         const text = response.choices[0]?.message?.content || '';
-        if (!text) throw new Error("Empty response from AI");
+        if (!text) throw new Error(`Empty response from AI (finish_reason: ${response.choices[0]?.finish_reason ?? 'unknown'})`);
 
         return parseBackfillResponse(text, (t, tag) => this.extractTag(t, tag));
     }
