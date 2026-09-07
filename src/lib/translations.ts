@@ -124,6 +124,7 @@ export const translations = {
             screenshotFailed: "Screenshot failed",
             screenshotPermissionDenied: "Screenshot permission denied",
             screenshotComplete: "Screenshot captured! Returning to upload page...",
+            pasteHint: "Or paste an image directly with Ctrl+V",
         },
         editor: {
             title: "Review & Correct",
@@ -844,6 +845,7 @@ export const translations = {
             screenshotFailed: "截图失败",
             screenshotPermissionDenied: "截图权限被拒绝",
             screenshotComplete: "截图完成！正在返回上传页面...",
+            pasteHint: "或使用 Ctrl+V 直接粘贴图片",
         },
         editor: {
             title: "校对与保存",

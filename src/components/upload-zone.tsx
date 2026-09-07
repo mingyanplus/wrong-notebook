@@ -37,6 +37,28 @@ export function UploadZone({ onImageSelect, isAnalyzing }: UploadZoneProps) {
         }
     }, []);
 
+    // 支持从剪贴板直接粘贴图片（Ctrl+V / Cmd+V）
+    useEffect(() => {
+        const onPaste = (event: ClipboardEvent) => {
+            if (isAnalyzing) return;
+            const items = event.clipboardData?.items;
+            if (!items) return;
+            for (const item of Array.from(items)) {
+                if (item.kind === 'file' && (item.type === 'image/png' || item.type === 'image/jpeg')) {
+                    const blob = item.getAsFile();
+                    if (blob) {
+                        const file = new File([blob], blob.name || `paste-${Date.now()}.png`, { type: item.type });
+                        event.preventDefault();
+                        onImageSelect(file);
+                        return;
+                    }
+                }
+            }
+        };
+        window.addEventListener('paste', onPaste);
+        return () => window.removeEventListener('paste', onPaste);
+    }, [isAnalyzing, onImageSelect]);
+
     const onDrop = useCallback(
         (acceptedFiles: File[]) => {
             const file = acceptedFiles[0];
@@ -202,6 +224,9 @@ export function UploadZone({ onImageSelect, isAnalyzing }: UploadZoneProps) {
                         </p>
                         <p className="text-xs text-muted-foreground mt-2">
                             {t.upload.support}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                            {t.upload.pasteHint}
                         </p>
                     </div>
                 </CardContent>
