@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
 import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
-import { safeParseParsedQuestion, parseBackfillResponse } from './schema';
+import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes } from './schema';
 import { getAppConfig, getThinkingLevel, type ThinkingTask, type ThinkingLevel } from '../config';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
@@ -110,7 +110,7 @@ export class GeminiProvider implements AIService {
             return null;
         }
 
-        return text.substring(startIndex + startTag.length, endIndex).trim();
+        return normalizeLatexEscapes(text.substring(startIndex + startTag.length, endIndex).trim());
     }
 
     private parseResponse(text: string): ParsedQuestion {

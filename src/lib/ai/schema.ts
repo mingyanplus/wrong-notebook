@@ -54,6 +54,14 @@ export function safeParseParsedQuestion(data: unknown) {
 }
 
 /**
+ * 还原 AI 偶发输出的 JSON 风格反斜杠转义（如 \\frac → \frac）。
+ * 仅匹配「\\ + 命令字母」的组合；LaTeX 合法的换行命令 \\ 后面不会直接跟字母，不受影响。
+ */
+export function normalizeLatexEscapes(text: string): string {
+    return text.replace(/\\\\(?=[a-zA-Z])/g, '\\');
+}
+
+/**
  * 解析 backfillMeta 的 XML 标签响应（三个 Provider 共享；provider 仅传入各自的 extractTag）
  */
 export function parseBackfillResponse(

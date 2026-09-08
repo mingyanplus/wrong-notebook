@@ -4,7 +4,7 @@
  * 测试 Zod 验证 schema，特别是新增的错因分析字段
  */
 import { describe, it, expect } from 'vitest';
-import { ParsedQuestionSchema, safeParseParsedQuestion } from '@/lib/ai/schema';
+import { ParsedQuestionSchema, safeParseParsedQuestion, normalizeLatexEscapes } from '@/lib/ai/schema';
 
 describe('ParsedQuestionSchema 验证', () => {
     const validBaseQuestion = {
@@ -146,5 +146,29 @@ describe('ParsedQuestionSchema 验证', () => {
             });
             expect(result.success).toBe(false);
         });
+    });
+});
+
+describe('normalizeLatexEscapes', () => {
+    it('应还原 AI 偶发的双反斜杠 LaTeX 转义（生产实测案例）', () => {
+        const escaped = String.raw`$$\\frac{2}{1+2}\\times\\frac{2+3}{1+2+3}\\times\\cdots\\times\\frac{2+3+\\cdots+50}{1+2+3+\\cdots+50}$$`;
+        const expected = String.raw`$$\frac{2}{1+2}\times\frac{2+3}{1+2+3}\times\cdots\times\frac{2+3+\cdots+50}{1+2+3+\cdots+50}$$`;
+        expect(normalizeLatexEscapes(escaped)).toBe(expected);
+    });
+
+    it('正常的单反斜杠 LaTeX 不应被改动', () => {
+        const normal = String.raw`$\frac{1}{3}+\frac{1}{3+6}+\cdots+\frac{1}{3+6+9+\cdots+99}$`;
+        expect(normalizeLatexEscapes(normal)).toBe(normal);
+    });
+
+    it('LaTeX 换行命令 \\\\（含带间距的 \\\\[2pt]）应保持不变', () => {
+        const multiline = String.raw`\begin{aligned} x &= 1 \\ y &= 2 \\[2pt] z &= 3 \end{aligned}`;
+        expect(normalizeLatexEscapes(multiline)).toBe(multiline);
+    });
+
+    it('无公式的纯文本不应被改动', () => {
+        const plain = '解：先通分再相加，注意运算顺序。';
+        expect(normalizeLatexEscapes(plain)).toBe(plain);
+        expect(normalizeLatexEscapes('')).toBe('');
     });
 });

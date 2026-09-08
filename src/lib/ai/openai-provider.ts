@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
 import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
 import { getAppConfig, getThinkingLevel, type ThinkingTask } from '../config';
-import { safeParseParsedQuestion, parseBackfillResponse } from './schema';
+import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
 import { normalizeMistakeStatusForSave } from '../mistake-status';
@@ -100,14 +100,14 @@ export class OpenAIProvider implements AIService {
         // 我们尝试读取到字符串末尾
         if (endIndex === -1 && tagName === 'analysis') {
             logger.warn({ tagName }, 'Tag was verified unclosed, treating as truncated and reading to end');
-            return text.substring(contentStartIndex).trim();
+            return normalizeLatexEscapes(text.substring(contentStartIndex).trim());
         }
 
         if (endIndex === -1 || contentStartIndex >= endIndex) {
             return null;
         }
 
-        return text.substring(contentStartIndex, endIndex).trim();
+        return normalizeLatexEscapes(text.substring(contentStartIndex, endIndex).trim());
     }
 
     private parseResponse(text: string): ParsedQuestion {

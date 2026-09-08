@@ -2,7 +2,7 @@ import { AzureOpenAI } from "openai";
 import { AIService, ParsedQuestion, DifficultyLevel, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
 import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateReanswerPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
 import { getAppConfig, getThinkingLevel, type ThinkingTask } from '../config';
-import { safeParseParsedQuestion, parseBackfillResponse } from './schema';
+import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
 import { normalizeMistakeStatusForSave } from '../mistake-status';
@@ -88,7 +88,7 @@ export class AzureOpenAIProvider implements AIService {
             return null;
         }
 
-        return text.substring(startIndex + startTag.length, endIndex).trim();
+        return normalizeLatexEscapes(text.substring(startIndex + startTag.length, endIndex).trim());
     }
 
     private parseResponse(text: string): ParsedQuestion {

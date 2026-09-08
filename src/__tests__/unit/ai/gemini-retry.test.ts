@@ -30,6 +30,7 @@ vi.mock('@/lib/config', () => ({
 
 vi.mock('@/lib/ai/schema', () => ({
     safeParseParsedQuestion: vi.fn((data) => ({ success: true, data })),
+    normalizeLatexEscapes: vi.fn((text: string) => text),
 }));
 
 // Mock tag service to avoid DB calls
