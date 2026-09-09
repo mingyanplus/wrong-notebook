@@ -166,6 +166,7 @@ export async function POST(req: Request) {
             section: string; questionType: string; score: number; isVariant: boolean;
             sourceErrorItemId: string | null; questionText: string; answerText: string;
             analysis: string; knowledgePoints: string | null; originalImageUrl: string | null;
+            requiresImage: boolean | null;
         }
         const drafts: DraftQuestion[] = plan.map(({ item, isVariant }, idx) => {
             const v = isVariant ? variantByPlanIndex.get(idx) : undefined;
@@ -181,6 +182,7 @@ export async function POST(req: Request) {
                     analysis: v.analysis,
                     knowledgePoints: JSON.stringify(v.knowledgePoints),
                     originalImageUrl: null,
+                    requiresImage: null,
                 };
             }
             // 原题，或变式生成失败后降级为原题
@@ -195,6 +197,7 @@ export async function POST(req: Request) {
                 analysis: item.analysis || "",
                 knowledgePoints: JSON.stringify(item.tags.map((t) => t.name)),
                 originalImageUrl: item.originalImageUrl,
+                requiresImage: item.requiresImage,
             };
         });
 

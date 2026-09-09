@@ -366,6 +366,70 @@ describe('/api/error-items', () => {
             expect(data.knowledgePoints).toContain('新知识点1');
         });
 
+        it('应该序列化保存打印遮罩并写入 requiresImage', async () => {
+            const existingItem = {
+                id: 'error-item-1',
+                userId: 'user-123',
+                imageMasks: null,
+                requiresImage: null,
+            };
+            mocks.mockPrismaErrorItem.findUnique.mockResolvedValue(existingItem);
+            mocks.mockPrismaErrorItem.update.mockResolvedValue({
+                ...existingItem,
+                imageMasks: '[{"x":0.1,"y":0.2,"w":0.3,"h":0.4}]',
+                requiresImage: true,
+            });
+
+            const request = new Request('http://localhost/api/error-items/error-item-1', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    imageMasks: [{ x: 0.1, y: 0.2, w: 0.3, h: 0.4 }, { x: 2, y: 0, w: 0.1, h: 0.1 }],
+                    requiresImage: true,
+                }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            const response = await PUT(request, { params: Promise.resolve({ id: 'error-item-1' }) });
+            await response.json();
+
+            expect(response.status).toBe(200);
+            // 非法遮罩（坐标越界）被过滤后序列化
+            expect(mocks.mockPrismaErrorItem.update).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: expect.objectContaining({
+                        imageMasks: '[{"x":0.1,"y":0.2,"w":0.3,"h":0.4}]',
+                        requiresImage: true,
+                    }),
+                })
+            );
+        });
+
+        it('空遮罩数组应清除遮罩（写入 null）', async () => {
+            const existingItem = {
+                id: 'error-item-1',
+                userId: 'user-123',
+                imageMasks: '[{"x":0.1,"y":0.1,"w":0.2,"h":0.2}]',
+            };
+            mocks.mockPrismaErrorItem.findUnique.mockResolvedValue(existingItem);
+            mocks.mockPrismaErrorItem.update.mockResolvedValue({ ...existingItem, imageMasks: null });
+
+            const request = new Request('http://localhost/api/error-items/error-item-1', {
+                method: 'PUT',
+                body: JSON.stringify({ imageMasks: [] }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+
+            const response = await PUT(request, { params: Promise.resolve({ id: 'error-item-1' }) });
+            await response.json();
+
+            expect(response.status).toBe(200);
+            expect(mocks.mockPrismaErrorItem.update).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    data: expect.objectContaining({ imageMasks: null }),
+                })
+            );
+        });
+
         it('应该成功更新年级学期', async () => {
             const existingItem = {
                 id: 'error-item-1',

@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { getServerSession } from "next-auth";
 import { unauthorized, forbidden, notFound, internalError } from "@/lib/api-errors";
 import { serializeSecondaryCategories } from "@/lib/error-categories";
+import { serializeImageMasks } from "@/lib/image-masks";
 import { createLogger } from "@/lib/logger";
 import { findParentTagIdForGrade } from "@/lib/tag-recognition";
 import { normalizeMistakeStatusForSave } from "@/lib/mistake-status";
@@ -76,7 +77,7 @@ export async function PUT(
         }
 
         const body = await req.json();
-        const { knowledgePoints, gradeSemester, paperLevel, questionText, answerText, analysis, subjectId,  wrongAnswerText, mistakeAnalysis, mistakeStatus, geogebraCommands, errorCategory, secondaryErrorCategories, questionType, stuckPoint, source } = body;
+        const { knowledgePoints, gradeSemester, paperLevel, questionText, answerText, analysis, subjectId,  wrongAnswerText, mistakeAnalysis, mistakeStatus, geogebraCommands, errorCategory, secondaryErrorCategories, questionType, stuckPoint, source, requiresImage, imageMasks } = body;
 
         const errorItem = await prisma.errorItem.findUnique({
             where: { id },
@@ -120,6 +121,8 @@ export async function PUT(
         if (errorCategory !== undefined) updateData.errorCategory = errorCategory || null;
         if (secondaryErrorCategories !== undefined) updateData.secondaryErrorCategories = serializeSecondaryCategories(secondaryErrorCategories);
         if (questionType !== undefined) updateData.questionType = questionType || null;
+        if (requiresImage !== undefined) updateData.requiresImage = typeof requiresImage === "boolean" ? requiresImage : null;
+        if (imageMasks !== undefined) updateData.imageMasks = serializeImageMasks(imageMasks);
         if (stuckPoint !== undefined) updateData.stuckPoint = stuckPoint || null;
         if (source !== undefined) updateData.source = source || null;
 

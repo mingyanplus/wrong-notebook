@@ -37,6 +37,7 @@ export async function POST(req: Request) {
             secondaryErrorCategories,
             questionType,
             source,
+            requiresImage,
         } = body;
 
         // 记录请求参数（不记录完整图片数据）
@@ -183,6 +184,7 @@ export async function POST(req: Request) {
                     errorCategory: errorCategory || null,
                     secondaryErrorCategories: serializeSecondaryCategories(secondaryErrorCategories),
                     questionType: questionType || null,
+                    requiresImage: typeof requiresImage === "boolean" ? requiresImage : null,
                     source: source || null,
                     masteryLevel: 0,
                     tags: {

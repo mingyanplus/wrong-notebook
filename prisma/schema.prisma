@@ -88,6 +88,8 @@ model ErrorItem {
   
   originalImageUrl String
   ocrText          String?
+  requiresImage    Boolean? // AI 判断：必须看图才能作答（几何图/函数图像/装置图等）；null=未判断（打印时保守显示）
+  imageMasks       String?  // 打印遮罩 JSON：[{x,y,w,h}] 归一化 0-1 相对坐标，打印时白块覆盖原图上的手写痕迹
   
   // AI Analysis
   questionText     String? // Parsed question
@@ -185,6 +187,7 @@ model PaperQuestion {
   analysis         String
   knowledgePoints  String?  // JSON 数组
   originalImageUrl String?  // 原题图片（原题模式展示）
+  requiresImage    Boolean? // 原题快照：是否必须看图（null=未判断，打印智能模式保守显示）
 
   // 作答结果（录成绩后回填）
   isCorrect    Boolean?

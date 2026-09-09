@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { flushSync } from "react-dom";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Printer, ClipboardCheck, Trash2, Check, X, RotateCcw } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Loader2, Printer, ClipboardCheck, Trash2, Check, RotateCcw, ChevronDown, Eraser } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiClient } from "@/lib/api-client";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { QUESTION_TYPES } from "@/lib/error-categories";
+import { ImageMaskEditor } from "@/components/practice/image-mask-editor";
+import type { ImageMask } from "@/lib/image-masks";
 
 interface PaperQuestion {
     id: string;
@@ -23,6 +27,8 @@ interface PaperQuestion {
     analysis: string;
     knowledgePoints: string | null;
     originalImageUrl: string | null;
+    requiresImage: boolean | null; // 原题是否必须看图（null=未判断，打印智能模式保守显示）
+    imageMasks: ImageMask[];       // 源错题的打印遮罩（白块覆盖手写痕迹）
     isCorrect: boolean | null;
 }
 
@@ -53,6 +59,9 @@ export default function PaperDetailPage() {
     const [grading, setGrading] = useState(false);
     const [gradeInputs, setGradeInputs] = useState<Record<string, boolean>>({});
     const [saving, setSaving] = useState(false);
+    // 打印时原图处理模式：smart=按 requiresImage 分流（防作答痕迹泄题）/ hide=全部隐藏 / show=全部显示
+    const [imageMode, setImageMode] = useState<"smart" | "hide" | "show">("smart");
+    const [maskEditing, setMaskEditing] = useState<PaperQuestion | null>(null);
 
     useEffect(() => {
         if (params.id) {
@@ -74,9 +83,23 @@ export default function PaperDetailPage() {
         return Array.from(map.entries());
     }, [paper]);
 
-    const print = (withAnswers: boolean) => {
+    // 智能模式下将隐藏原图的题数（菜单提示用）
+    const smartHiddenCount = useMemo(
+        () => (paper?.questions ?? []).filter((q) => q.originalImageUrl && !q.isVariant && q.requiresImage === false).length,
+        [paper]
+    );
+
+    const printHideImage = (q: PaperQuestion): boolean => {
+        if (imageMode === "hide") return true;
+        if (imageMode === "show") return false;
+        return q.requiresImage === false; // smart：仅明确判定"无需看图"才隐藏，null 保守显示
+    };
+
+    const print = (withAnswers: boolean, mode: "smart" | "hide" | "show") => {
         const el = document.getElementById("answer-section");
         if (el) el.style.display = withAnswers ? "block" : "none";
+        // 图片显隐靠 className 生效，flushSync 确保 DOM 同步更新后再唤起打印
+        flushSync(() => setImageMode(mode));
         window.print();
     };
 
@@ -157,10 +180,28 @@ export default function PaperDetailPage() {
                         <Button variant="outline" onClick={startGrading}>
                             <ClipboardCheck className="mr-2 h-4 w-4" />{t.paper?.recordGrades || "录成绩"}
                         </Button>
-                        <Button variant="outline" onClick={() => print(false)}>
-                            <Printer className="mr-2 h-4 w-4" />{t.paper?.printQuestions || "打印题目卷"}
-                        </Button>
-                        <Button variant="outline" onClick={() => print(true)}>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline">
+                                    <Printer className="mr-2 h-4 w-4" />{t.paper?.printQuestions || "打印题目卷"}
+                                    <ChevronDown className="ml-1 h-4 w-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => print(false, "smart")}>
+                                    智能模式{smartHiddenCount > 0 ? `（隐藏 ${smartHiddenCount} 题原图）` : ""}
+                                    <span className="block text-xs text-muted-foreground">无需看图的题不打印原图，防止作答痕迹泄答案</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => print(false, "hide")}>
+                                    隐藏全部原图
+                                    <span className="block text-xs text-muted-foreground">纯文字重做，适合题干已完整转录的卷子</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => print(false, "show")}>
+                                    显示全部原图
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        <Button variant="outline" onClick={() => print(true, "show")}>
                             <Printer className="mr-2 h-4 w-4" />{t.paper?.printWithAnswers || "打印（含答案）"}
                         </Button>
                         <Button variant="ghost" size="sm" onClick={deletePaper}>
@@ -197,12 +238,40 @@ export default function PaperDetailPage() {
                                             <MarkdownRenderer content={q.questionText} />
                                         </div>
                                         {q.originalImageUrl && !q.isVariant && (
-                                            // eslint-disable-next-line @next/next/no-img-element
-                                            <img
-                                                src={q.originalImageUrl}
-                                                alt="原题"
-                                                className="mt-2 max-w-[45%] rounded border print:max-w-[55%]"
-                                            />
+                                            <div className={`relative mt-2 inline-block ${printHideImage(q) ? "print:hidden" : ""}`}>
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img
+                                                    src={q.originalImageUrl}
+                                                    alt="原题"
+                                                    className="block max-w-[45%] rounded border print:max-w-[55%]"
+                                                />
+                                                {/* 打印遮罩：白色覆盖原图上的手写痕迹（print-color-adjust 确保打印背景色生效） */}
+                                                {q.imageMasks?.map((m, i) => (
+                                                    <div
+                                                        key={i}
+                                                        className="absolute bg-white print:border-0"
+                                                        style={{
+                                                            left: `${m.x * 100}%`,
+                                                            top: `${m.y * 100}%`,
+                                                            width: `${m.w * 100}%`,
+                                                            height: `${m.h * 100}%`,
+                                                            printColorAdjust: "exact",
+                                                            WebkitPrintColorAdjust: "exact",
+                                                        }}
+                                                    />
+                                                ))}
+                                            </div>
+                                        )}
+                                        {q.originalImageUrl && !q.isVariant && q.sourceErrorItemId && (
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                className="print:hidden mt-1 h-7 gap-1 px-2 text-xs text-muted-foreground"
+                                                onClick={() => setMaskEditing(q)}
+                                            >
+                                                <Eraser className="h-3.5 w-3.5" />
+                                                遮盖作答痕迹{q.imageMasks?.length ? `（${q.imageMasks.length}）` : ""}
+                                            </Button>
                                         )}
                                         {grading && (
                                             <div className="mt-2 flex items-center gap-2">
@@ -264,6 +333,24 @@ export default function PaperDetailPage() {
                     </CardContent>
                 </Card>
             </div>
+
+            {/* 遮罩标注器：保存后本地更新对应题的遮罩（无需整卷刷新） */}
+            {maskEditing && maskEditing.sourceErrorItemId && maskEditing.originalImageUrl && (
+                <ImageMaskEditor
+                    errorItemId={maskEditing.sourceErrorItemId}
+                    imageUrl={maskEditing.originalImageUrl}
+                    initialMasks={maskEditing.imageMasks ?? []}
+                    open={!!maskEditing}
+                    onOpenChange={(o) => { if (!o) setMaskEditing(null); }}
+                    onSaved={(masks) => {
+                        const targetId = maskEditing.id;
+                        setPaper((p) => p && ({
+                            ...p,
+                            questions: p.questions.map((qq) => qq.id === targetId ? { ...qq, imageMasks: masks } : qq),
+                        }));
+                    }}
+                />
+            )}
 
         </div>
     );
