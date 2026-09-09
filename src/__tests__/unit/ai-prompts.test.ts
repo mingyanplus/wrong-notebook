@@ -457,6 +457,7 @@ describe('AI Prompts', () => {
             const b = generateBackfillPromptParts({ questionText: '题目B', answerText: '答案B', analysis: '解析B', wrongAnswerText: '错解B', subject: '物理', tagList: '"力学"' });
             expect(a.systemPrompt).toBe(b.systemPrompt);
             expect(a.systemPrompt.length).toBeGreaterThan(300);
+            expect(a.systemPrompt).toContain('<requires_image>'); // 存量补全输出"是否必须看图"
         });
 
         it('backfill：题目内容进入 userContext 末段，学科/标签/错因说明在前（批量场景 user 前缀稳定）', () => {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ERROR_CATEGORIES, ErrorCategoryCode, parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from '../error-categories';
+import type { BackfillMetaResult } from './types';
 
 const CATEGORY_CODES = [...ERROR_CATEGORIES.map((c) => c.code)] as [ErrorCategoryCode, ...ErrorCategoryCode[]];
 // 主错因枚举额外允许 "unknown"（无学生作答时 AI 无法判定）
@@ -67,9 +68,11 @@ export function normalizeLatexEscapes(text: string): string {
 export function parseBackfillResponse(
     text: string,
     extractTag: (text: string, tagName: string) => string | null
-): { knowledgePoints: string[]; questionType: "choice" | "fill" | "solve" | "judge"; errorCategory: string; secondaryErrorCategories: string[] } {
+): BackfillMetaResult {
     const knowledgePointsRaw = extractTag(text, "knowledge_points") || "";
     const errorCategory = parseErrorCategoryCode(extractTag(text, "error_category"));
+    // 仅 true/false 明确输出时返回布尔，其余（缺标签/胡乱填写）返回 undefined 供调用方跳过不覆盖
+    const requiresImageRaw = extractTag(text, "requires_image")?.toLowerCase().trim();
     return {
         knowledgePoints: knowledgePointsRaw
             .split(/[,，\n]/)
@@ -79,5 +82,6 @@ export function parseBackfillResponse(
         questionType: parseQuestionTypeCode(extractTag(text, "question_type")),
         errorCategory,
         secondaryErrorCategories: parseSecondaryCategories(extractTag(text, "secondary_error_categories"), errorCategory),
+        requiresImage: requiresImageRaw === "true" ? true : requiresImageRaw === "false" ? false : undefined,
     };
 }

@@ -44,6 +44,7 @@ export async function POST(req: Request) {
                         { errorCategory: null },
                         { questionType: null },
                         { tags: { none: {} } },
+                        { requiresImage: null }, // 存量补全：未判断"是否必须看图"的题
                     ],
                 },
                 include: { tags: true, subject: true },
@@ -81,6 +82,10 @@ export async function POST(req: Request) {
                 }
                 if (meta.questionType && !item.questionType) {
                     data.questionType = meta.questionType;
+                }
+                // 是否必须看图：AI 明确输出才写入（undefined 不覆盖已有值），打印智能分流依赖此字段
+                if (meta.requiresImage !== undefined) {
+                    data.requiresImage = meta.requiresImage;
                 }
 
                 // 标签补全（仅当当前无标签）

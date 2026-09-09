@@ -828,6 +828,10 @@ const BACKFILL_STATIC_TEMPLATE = `你是一位跨学科教育专家。请分析�
 填写以下值之一：choice（选择题）、fill（填空题）、solve（解答题/计算题/主观题）、judge（判断题）。
 </question_type>
 
+<requires_image>
+根据题目文本判断该题是否必须看图才能作答：题干明确提到"如图""下图"或描述几何图形、函数图像、实验装置、电路图等图形结构的填 true；纯文字即可理解的填 false。拿不准时填 true（保守）。
+</requires_image>
+
 <error_category>
 分析学生的主要错误原因，按照【错因分类说明】的要求填写 code。
 </error_category>
@@ -837,7 +841,7 @@ const BACKFILL_STATIC_TEMPLATE = `你是一位跨学科教育专家。请分析�
 </secondary_error_categories>
 
 【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
-1. **格式严格**：必须严格包含上述 4 个 XML 标签，不要输出其他内容。
+1. **格式严格**：必须严格包含上述 5 个 XML 标签，不要输出其他内容。
 2. **不要猜测**：没有学生错误作答时，error_category 必须填 unknown。`;
 
 /**

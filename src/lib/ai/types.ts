@@ -33,6 +33,7 @@ export interface BackfillMetaResult {
     questionType: "choice" | "fill" | "solve" | "judge";
     errorCategory: string; // code 或 "unknown"
     secondaryErrorCategories: string[];
+    requiresImage?: boolean; // AI 按题干文本判断是否必须看图；undefined=未输出（不覆盖已有值）
 }
 
 export interface AIService {
