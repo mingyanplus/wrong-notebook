@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
-import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
+import { generateAnalyzePromptParts, generateSimilarQuestionPromptParts, generateGeogebraPromptParts, generateBackfillPromptParts } from './prompts';
 import { getAppConfig, getThinkingLevel, type ThinkingTask } from '../config';
 import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
@@ -190,7 +190,8 @@ export class OpenAIProvider implements AIService {
         const prefetchedBiologyTags = (subject === '生物' || !subject) ? await getTagsFromDB('biology') : [];
         const prefetchedEnglishTags = (subject === '英语' || !subject) ? await getTagsFromDB('english') : [];
 
-        const systemPrompt = generateAnalyzePrompt(language, grade, subject, {
+        // 缓存友好拆分：静态指令放 system（命中前缀缓存），标签列表/错因分类/年级约束随图片放 user
+        const { systemPrompt, userContext } = generateAnalyzePromptParts(language, grade, subject, {
             customTemplate: config.prompts?.analyze,
             prefetchedMathTags,
             prefetchedPhysicsTags,
@@ -222,6 +223,7 @@ export class OpenAIProvider implements AIService {
                     {
                         role: "user",
                         content: [
+                            ...(userContext ? [{ type: "text", text: userContext.substring(0, 200) + (userContext.length > 200 ? '...' : '') }] : []),
                             {
                                 type: "image_url",
                                 image_url: {
@@ -245,6 +247,7 @@ export class OpenAIProvider implements AIService {
                     {
                         role: "user",
                         content: [
+                            ...(userContext ? [{ type: "text", text: userContext }] : []),
                             {
                                 type: "image_url",
                                 image_url: {
@@ -287,6 +290,7 @@ export class OpenAIProvider implements AIService {
                         {
                             role: "user",
                             content: [
+                                ...(userContext ? [{ type: "text" as const, text: userContext }] : []),
                                 {
                                     type: "image_url",
                                     image_url: {
@@ -332,10 +336,10 @@ export class OpenAIProvider implements AIService {
 
     async generateSimilarQuestion(originalQuestion: string, knowledgePoints: string[], language: 'zh' | 'en' = 'zh', difficulty: DifficultyLevel = 'medium', gradeSemester?: string | null, mistakeHint?: string): Promise<ParsedQuestion> {
         const config = getAppConfig();
-        const systemPrompt = generateSimilarQuestionPrompt(language, originalQuestion, knowledgePoints, difficulty, {
+        // 缓存友好拆分：静态模板放 system（命中前缀缓存），原题/知识点/难度等变量放 user
+        const { systemPrompt, userContext: userPrompt } = generateSimilarQuestionPromptParts(language, originalQuestion, knowledgePoints, difficulty, {
             customTemplate: config.prompts?.similar
         }, gradeSemester, mistakeHint);
-        const userPrompt = `\nOriginal Question: "${originalQuestion}"\nKnowledge Points: ${knowledgePoints.join(", ")}\n    `;
 
         logger.box('🎯 Generate Similar Question Request', {
             provider: 'OpenAI',
@@ -383,8 +387,9 @@ export class OpenAIProvider implements AIService {
     }
 
     async reanswerQuestion(questionText: string, language: 'zh' | 'en' = 'zh', subject?: string | null, imageBase64?: string, gradeSemester?: string | null): Promise<ReanswerQuestionResult> {
-        const { generateReanswerPrompt } = await import('./prompts');
-        const prompt = generateReanswerPrompt(language, questionText, subject, undefined, gradeSemester);
+        const { generateReanswerPromptParts } = await import('./prompts');
+        // 缓存友好拆分：静态指令放 system（命中前缀缓存），学科提示/题目内容随图片放 user
+        const { systemPrompt, userContext } = generateReanswerPromptParts(language, questionText, subject, undefined, gradeSemester);
 
         logger.info({
             provider: 'OpenAI',
@@ -397,14 +402,14 @@ export class OpenAIProvider implements AIService {
         logger.debug({ prompt }, 'Full prompt');
 
         try {
-            // 根据是否有图片构建不同的消息内容
-            let userContent: OpenAIUserContent = "请根据上述题目提供答案和解析。";
+            // 根据是否有图片构建不同的消息内容：变量区文本在前，图片在后
+            let userContent: OpenAIUserContent = userContext;
             if (imageBase64) {
                 // 如果有图片，构建多模态消息
                 const imageUrl = imageBase64.startsWith('data:') ? imageBase64 : `data:image/jpeg;base64,${imageBase64}`;
                 logger.debug({ imageLength: imageUrl.length }, 'Image added to request');
                 userContent = [
-                    { type: "text", text: "请结合图片和题目描述提供答案和解析。" },
+                    { type: "text", text: userContext },
                     { type: "image_url", image_url: { url: imageUrl } }
                 ];
             } else {
@@ -415,8 +420,8 @@ export class OpenAIProvider implements AIService {
             const requestParams = {
                 model: this.model,
                 messages: [
-                    { role: "system", content: prompt.substring(0, 200) + "..." },
-                    { role: "user", content: typeof userContent === 'string' ? userContent : "[包含图片的多模态消息]" }
+                    { role: "system", content: systemPrompt.substring(0, 200) + "..." },
+                    { role: "user", content: typeof userContent === 'string' ? userContent.substring(0, 200) + "..." : "[含题目文本与图片的多模态消息]" }
                 ],
                 max_tokens: MAX_OUTPUT_TOKENS
             };
@@ -426,7 +431,7 @@ export class OpenAIProvider implements AIService {
                 model: this.model,
                 ...this.genEffortOptions('reanswer'),
                 messages: [
-                    { role: "system", content: prompt },
+                    { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
                 ],
                 max_tokens: MAX_OUTPUT_TOKENS,
@@ -470,7 +475,8 @@ export class OpenAIProvider implements AIService {
     }
 
     async analyzeForGeogebra(questionText: string, answerText: string, analysis: string, previousErrors?: string): Promise<GeogebraAnalysisResult> {
-        const prompt = generateGeogebraPrompt(questionText, answerText, analysis, previousErrors);
+        // 缓存友好拆分：静态规范放 system（命中前缀缓存），题目内容放 user
+        const { systemPrompt, userContext } = generateGeogebraPromptParts(questionText, answerText, analysis, previousErrors);
 
         logger.info({
             provider: 'OpenAI',
@@ -483,8 +489,8 @@ export class OpenAIProvider implements AIService {
                 model: this.model,
                 ...this.genEffortOptions('geogebra'),
                 messages: [
-                    { role: "system", content: prompt },
-                    { role: "user", content: "请分析上述题目并生成 GeoGebra 演示命令。" }
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userContext }
                 ],
                 max_tokens: MAX_OUTPUT_TOKENS,
             });
@@ -523,12 +529,16 @@ export class OpenAIProvider implements AIService {
     }
 
     async backfillMeta(questionText: string, answerText?: string, analysis?: string, wrongAnswerText?: string, subject?: string | null, tagList?: string): Promise<BackfillMetaResult> {
-        const prompt = generateBackfillPrompt({ questionText, answerText, analysis, wrongAnswerText, subject, tagList });
+        // 缓存友好拆分：此前单条 user 消息题目在前导致静态规则全部缓存失效，改为 system 静态段 + user 变量区
+        const { systemPrompt, userContext } = generateBackfillPromptParts({ questionText, answerText, analysis, wrongAnswerText, subject, tagList });
 
         const response = await this.openai.chat.completions.create({
             model: this.model,
                 ...this.genEffortOptions('backfill'),
-            messages: [{ role: "user", content: prompt }],
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userContext },
+            ],
         });
         const text = response.choices[0]?.message?.content || '';
         if (!text) throw new Error(`Empty response from AI (finish_reason: ${response.choices[0]?.finish_reason ?? 'unknown'})`);

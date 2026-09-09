@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
-import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
+import { generateAnalyzePromptParts, generateSimilarQuestionPromptParts, generateGeogebraPromptParts, generateBackfillPromptParts } from './prompts';
 import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes } from './schema';
 import { getAppConfig, getThinkingLevel, type ThinkingTask, type ThinkingLevel } from '../config';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
@@ -9,11 +9,6 @@ import { normalizeMistakeStatusForSave } from '../mistake-status';
 import { parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from '../error-categories';
 
 const logger = createLogger('ai:gemini');
-
-type GeminiContent = string | Array<
-    { text: string } |
-    { inlineData: { mimeType: string; data: string } }
->;
 
 export class GeminiProvider implements AIService {
     private ai: GoogleGenAI;
@@ -189,7 +184,8 @@ export class GeminiProvider implements AIService {
         const prefetchedBiologyTags = (subject === '生物' || !subject) ? await getTagsFromDB('biology') : [];
         const prefetchedEnglishTags = (subject === '英语' || !subject) ? await getTagsFromDB('english') : [];
 
-        const prompt = generateAnalyzePrompt(language, grade, subject, {
+        // 缓存友好拆分：静态指令放 systemInstruction（命中前缀缓存），标签列表/错因分类/年级约束随图片放 user
+        const { systemPrompt, userContext } = generateAnalyzePromptParts(language, grade, subject, {
             customTemplate: config.prompts?.analyze,
             prefetchedMathTags,
             prefetchedPhysicsTags,
@@ -207,16 +203,25 @@ export class GeminiProvider implements AIService {
             language,
             grade: grade || 'all'
         });
-        logger.box('📝 Full Prompt', prompt);
+        logger.box('📝 System Prompt (静态缓存段)', systemPrompt);
+        if (userContext) logger.box('📝 User Context (变量段)', userContext);
 
         try {
+            // 用户消息：变量区文本（错因分类/标签列表/年级约束）在前，图片在后
+            const userContent = {
+                role: 'user',
+                parts: [
+                    ...(userContext ? [{ text: userContext }] : []),
+                    { inlineData: { data: imageBase64, mimeType: mimeType } }
+                ]
+            };
+
             // 构建请求参数（用于日志显示）
             const requestParamsForLog = {
                 model: this.modelName,
+                systemInstruction: `[${systemPrompt.length} chars...]`,
                 contents: [
-                    {
-                        text: prompt
-                    },
+                    ...(userContext ? [{ text: userContext.substring(0, 200) + (userContext.length > 200 ? '...' : '') }] : []),
                     {
                         inlineData: {
                             data: `[...${imageBase64.length} bytes base64 data...]`,
@@ -228,20 +233,12 @@ export class GeminiProvider implements AIService {
 
             logger.box('📤 API Request (发送给 AI 的原始请求)', JSON.stringify(requestParamsForLog, null, 2));
 
+            const options = this.genContentOptions('analyze');
             const response = await this.retryOperation(() => this.ai.models.generateContent({
                 model: this.modelName,
-                ...this.genContentOptions('analyze'),
-                contents: [
-                    {
-                        text: prompt
-                    },
-                    {
-                        inlineData: {
-                            data: imageBase64,
-                            mimeType: mimeType
-                        }
-                    }
-                ]
+                ...options,
+                config: { ...options.config, systemInstruction: systemPrompt || undefined },
+                contents: [userContent]
             }));
 
             logger.box('📦 Full API Response Metadata', {
@@ -271,7 +268,8 @@ export class GeminiProvider implements AIService {
 
     async generateSimilarQuestion(originalQuestion: string, knowledgePoints: string[], language: 'zh' | 'en' = 'zh', difficulty: DifficultyLevel = 'medium', gradeSemester?: string | null, mistakeHint?: string): Promise<ParsedQuestion> {
         const config = getAppConfig();
-        const prompt = generateSimilarQuestionPrompt(language, originalQuestion, knowledgePoints, difficulty, {
+        // 缓存友好拆分：静态模板放 systemInstruction（命中前缀缓存），原题/知识点/难度等变量放 user
+        const { systemPrompt, userContext } = generateSimilarQuestionPromptParts(language, originalQuestion, knowledgePoints, difficulty, {
             customTemplate: config.prompts?.similar
         }, gradeSemester, mistakeHint);
 
@@ -283,13 +281,16 @@ export class GeminiProvider implements AIService {
             difficulty,
             language
         });
-        logger.box('📝 Full Prompt', prompt);
+        logger.box('📝 System Prompt (静态缓存段)', systemPrompt);
+        logger.box('📝 User Context (变量段)', userContext);
 
         try {
+            const options = this.genContentOptions('similar');
             const response = await this.retryOperation(() => this.ai.models.generateContent({
                 model: this.modelName,
-                ...this.genContentOptions('similar'),
-                contents: prompt
+                ...options,
+                config: { ...options.config, systemInstruction: systemPrompt || undefined },
+                contents: userContext
             }));
 
             const text = response.text || '';
@@ -314,8 +315,9 @@ export class GeminiProvider implements AIService {
     }
 
     async reanswerQuestion(questionText: string, language: 'zh' | 'en' = 'zh', subject?: string | null, imageBase64?: string, gradeSemester?: string | null): Promise<ReanswerQuestionResult> {
-        const { generateReanswerPrompt } = await import('./prompts');
-        const prompt = generateReanswerPrompt(language, questionText, subject, undefined, gradeSemester);
+        const { generateReanswerPromptParts } = await import('./prompts');
+        // 缓存友好拆分：静态指令放 systemInstruction（命中前缀缓存），学科提示/题目内容随图片放 user
+        const { systemPrompt, userContext } = generateReanswerPromptParts(language, questionText, subject, undefined, gradeSemester);
 
         logger.info({
             provider: 'Gemini',
@@ -327,23 +329,24 @@ export class GeminiProvider implements AIService {
         logger.debug({ prompt }, 'Full prompt');
 
         try {
-            // 根据是否有图片构建不同的请求内容
-            let contents: GeminiContent;
-            if (imageBase64) {
-                // 移除 data:image/xxx;base64, 前缀（如果存在）
-                const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-                contents = [
-                    { text: prompt },
-                    { inlineData: { mimeType: 'image/jpeg', data: base64Data } }
-                ];
-            } else {
-                contents = prompt;
-            }
+            // 用户消息：变量区文本（学科提示/题目内容）在前，图片在后
+            const userContent = {
+                role: 'user',
+                parts: imageBase64
+                    ? [
+                        { text: userContext },
+                        // 移除 data:image/xxx;base64, 前缀（如果存在）
+                        { inlineData: { mimeType: 'image/jpeg', data: imageBase64.replace(/^data:image\/\w+;base64,/, '') } }
+                    ]
+                    : [{ text: userContext }]
+            };
 
+            const options = this.genContentOptions('reanswer');
             const response = await this.retryOperation(() => this.ai.models.generateContent({
                 model: this.modelName,
-                ...this.genContentOptions('reanswer'),
-                contents
+                ...options,
+                config: { ...options.config, systemInstruction: systemPrompt || undefined },
+                contents: [userContent]
             }));
 
             const text = response.text || '';
@@ -376,7 +379,8 @@ export class GeminiProvider implements AIService {
     }
 
     async analyzeForGeogebra(questionText: string, answerText: string, analysis: string, previousErrors?: string): Promise<GeogebraAnalysisResult> {
-        const prompt = generateGeogebraPrompt(questionText, answerText, analysis, previousErrors);
+        // 缓存友好拆分：静态规范放 systemInstruction（命中前缀缓存），题目内容放 user
+        const { systemPrompt, userContext } = generateGeogebraPromptParts(questionText, answerText, analysis, previousErrors);
 
         logger.info({
             provider: 'Gemini',
@@ -385,10 +389,12 @@ export class GeminiProvider implements AIService {
         }, 'GeoGebra Analysis Request');
 
         try {
+            const options = this.genContentOptions('geogebra');
             const response = await this.retryOperation(() => this.ai.models.generateContent({
                 model: this.modelName,
-                ...this.genContentOptions('geogebra'),
-                contents: prompt
+                ...options,
+                config: { ...options.config, systemInstruction: systemPrompt || undefined },
+                contents: userContext
             }));
 
             const text = response.text || '';
@@ -425,12 +431,15 @@ export class GeminiProvider implements AIService {
     }
 
     async backfillMeta(questionText: string, answerText?: string, analysis?: string, wrongAnswerText?: string, subject?: string | null, tagList?: string): Promise<BackfillMetaResult> {
-        const prompt = generateBackfillPrompt({ questionText, answerText, analysis, wrongAnswerText, subject, tagList });
+        // 缓存友好拆分：静态规则放 systemInstruction（命中前缀缓存），题目内容放 user
+        const { systemPrompt, userContext } = generateBackfillPromptParts({ questionText, answerText, analysis, wrongAnswerText, subject, tagList });
 
+        const options = this.genContentOptions('backfill');
         const response = await this.retryOperation(() => this.ai.models.generateContent({
             model: this.modelName,
-            ...this.genContentOptions('backfill'),
-            contents: prompt
+            ...options,
+            config: { ...options.config, systemInstruction: systemPrompt || undefined },
+            contents: userContext
         }));
         const text = response.text || '';
         if (!text) throw new Error("Empty response from AI");

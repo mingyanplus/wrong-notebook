@@ -113,7 +113,11 @@ export interface PromptOptions {
   prefetchedEnglishTags?: string[];
 }
 
-export const DEFAULT_ANALYZE_TEMPLATE = `【角色与核心任务 (ROLE AND CORE TASK)】
+/**
+ * 分析任务 system 静态段：全局稳定（仅 {{language_instruction}} 按语言二分）。
+ * 置于请求最前以命中各厂商（GLM/OpenAI/Gemini）的前缀缓存，禁止插入按用户/题目变化的变量。
+ */
+const ANALYZE_STATIC_TEMPLATE = `【角色与核心任务 (ROLE AND CORE TASK)】
 你是一位世界顶尖的、经验丰富的、专业的跨学科考试分析专家（Interdisciplinary Exam Analysis Expert）。你的核心任务是极致准确地分析用户提供的考试题目图片，全面理解所有文本、图表和隐含约束，并提供一个完整、高度结构化且专业的解决方案。
 
 {{language_instruction}}
@@ -152,7 +156,7 @@ export const DEFAULT_ANALYZE_TEMPLATE = `【角色与核心任务 (ROLE AND CORE
 </question_type>
 
 <error_category>
-分析学生的主要错误原因，{{error_category_instruction}}
+分析学生的主要错误原因，从【错因分类说明】中列出的 code 里选择最匹配的一项填写。
 </error_category>
 
 <secondary_error_categories>
@@ -209,50 +213,57 @@ export const DEFAULT_ANALYZE_TEMPLATE = `【角色与核心任务 (ROLE AND CORE
 * 如果解析过程需要表格（如列表对比、分步计算表），遵循上述【表格处理规则】。
 </analysis>
 
-【知识点标签列表（KNOWLEDGE POINT LIST）】
-{{knowledge_points_list}}
-
 【标签使用规则 (TAG RULES)】
 - 标签必须与题目实际考查的知识点精准匹配。
+- 必须从【知识点标签列表】中列出的可选标签中选择。
 - 每题最多 5 个标签。
 
 【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
 1. **格式严格**：必须严格包含上述全部 XML 标签，除此之外不要输出任何其他“开场白”或“结束语”。
 2. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。
 3. **内容完整**：如果包含子问题，请在 question_text 中完整列出。
-4. **禁止图片**：严禁包含任何图片链接或 markdown 图片语法。
+4. **禁止图片**：严禁包含任何图片链接或 markdown 图片语法。`;
 
-{{grade_instruction}}
-{{provider_hints}}`;
+/**
+ * 分析任务的变量区：随用户学科/年级/错因分类变化，渲染后置于 user 消息开头（图片之前），
+ * 与 system 静态段拼合即为完整提示词（保持 generateAnalyzePrompt 的整串语义）。
+ */
+const ANALYZE_CONTEXT_TEMPLATE = `【错因分类说明 (ERROR CATEGORY LIST)】
+{{error_category_instruction}}
 
-export const DEFAULT_SIMILAR_TEMPLATE = `你是一位资深的K12教育题目生成专家，具备跨学科的题目创作能力。你的核心任务是**根据以下原题和知识点，举一反三生成高质量教学题目**，帮助学生巩固知识并拓展解题思路。
+【知识点标签列表 (KNOWLEDGE POINT LIST)】
+{{knowledge_points_list}}
+{{grade_instruction}}{{provider_hints}}`;
+
+export const DEFAULT_ANALYZE_TEMPLATE = `${ANALYZE_STATIC_TEMPLATE}\n\n${ANALYZE_CONTEXT_TEMPLATE}`;
+
+/**
+ * 变式任务 system 静态段：全局稳定（仅 {{language_instruction}} 按语言二分），置于请求最前以命中前缀缓存。
+ */
+const SIMILAR_STATIC_TEMPLATE = `你是一位资深的K12教育题目生成专家，具备跨学科的题目创作能力。你的核心任务是**根据以下原题和知识点，举一反三生成高质量教学题目**，帮助学生巩固知识并拓展解题思路。
 ### 角色定义
-1. **学科全能专家**  
+1. **学科全能专家**
    - 精通K12阶段所有学科（数学/语文/英语/物理/化学/生物/历史/地理/政治）
    - 熟悉各年级课程标准与知识点分布
    - 能准确识别题目考察的核心能力点（计算/推理/分析/应用/创新）
-2. **题目变异大师**  
+2. **题目变异大师**
    - 掌握12种变式技法：条件替换/情境迁移/问题转化/数据重构/图形变形/角色反转/跨学科融合/难度阶梯/开放拓展/陷阱设计/逆向思维/生活应用
    - 确保变式题目保持原题核心考点，改变题目表现形式
-3. **学情分析师**  
+3. **学情分析师**
    - 预判学生易错点（认知盲区/概念混淆/计算失误/审题偏差）
    - 在变式题目中针对性强化易错点训练
 ### 执行流程
-1. **接收任务**  
-	原题: "{{original_question}}"
+1. **接收任务**
+	解析下方【题目信息】中的原题、知识点、难度级别与错因定向提示。
 	{{language_instruction}}
-	DIFFICULTY LEVEL: {{difficulty_level}}
-	{{difficulty_instruction}}
-	Knowledge Points: {{knowledge_points}}  
-	{{mistake_hint}}
-2. **解构分析**  
+2. **解构分析**
    - 提取核心考点与能力要求
    - 分析题目陷阱与解题路径
-3.  **质量管控**  
-   - 确保每道题：  
-     ✓ 覆盖相同核心知识点  
-     ✓ 保持解题逻辑一致性  
-     ✓ 答案唯一且可验证  
+3.  **质量管控**
+   - 确保每道题：
+     ✓ 覆盖相同核心知识点
+     ✓ 保持解题逻辑一致性
+     ✓ 答案唯一且可验证
      ✓ 无知识性错误
 ### 输出规范
 你的响应输出**必须严格遵循以下自定义标签格式**。**严禁**使用 JSON 或 Markdown 代码块。**严禁**返回 \`\`\`json ... \`\`\`。
@@ -274,10 +285,20 @@ export const DEFAULT_SIMILAR_TEMPLATE = `你是一位资深的K12教育题目生
 </analysis>
 
 ###关键格式与内容约束 (CRITICAL RULES) !!!
-1. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。
+1. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。`;
 
-{{grade_instruction}}
-{{provider_hints}}`;
+/**
+ * 变式任务的变量区：原题/知识点/难度/错因提示随每次请求变化，渲染后作为 user 消息。
+ */
+const SIMILAR_CONTEXT_TEMPLATE = `【题目信息 (TASK INPUT)】
+原题: "{{original_question}}"
+Knowledge Points: {{knowledge_points}}
+DIFFICULTY LEVEL: {{difficulty_level}}
+{{difficulty_instruction}}
+{{mistake_hint}}
+{{grade_instruction}}{{provider_hints}}`;
+
+export const DEFAULT_SIMILAR_TEMPLATE = `${SIMILAR_STATIC_TEMPLATE}\n\n${SIMILAR_CONTEXT_TEMPLATE}`;
 
 /**
  * Helper to replace placeholders in template
@@ -321,18 +342,14 @@ export function getMathTagsForGrade(
 }
 
 /**
- * Generates the analyze image prompt
- * @param language - Target language for analysis ('zh' or 'en')
- * @param grade - Optional grade level (7-9:初中, 10-12:高中) for cumulative tag filtering
- * @param options - Optional customizations
+ * 构建语言指令与学科标签区（generateAnalyzePrompt / generateAnalyzePromptParts 共用）
  */
-export function generateAnalyzePrompt(
+function buildAnalyzeVariables(
   language: 'zh' | 'en',
   grade?: 7 | 8 | 9 | 10 | 11 | 12 | null,
   subject?: string | null,
-  options?: PromptOptions,
-  gradeSemester?: string | null
-): string {
+  options?: PromptOptions
+): { langInstruction: string; tagsSection: string } {
   const langInstruction = language === 'zh'
     ? "IMPORTANT: For the 'analysis' field, use Simplified Chinese. For 'questionText' and 'answerText', YOU MUST USE THE SAME LANGUAGE AS THE ORIGINAL QUESTION. If the original question is in Chinese, the new question MUST be in Chinese. If the original is in English, keep it in English. If the original question is in English, the new 'questionText' and 'answerText' MUST be in English, but the 'analysis' MUST be in Simplified Chinese (to help the student understand). "
     : "Please ensure all text fields are in English.";
@@ -414,6 +431,33 @@ ${biologyTagsString}
 ${englishTagsString}`;
   }
 
+  return { langInstruction, tagsSection };
+}
+
+/**
+ * 缓存友好的提示词拆分结果：
+ * systemPrompt = 全局稳定的静态段（置于请求最前，命中前缀缓存）；
+ * userContext = 随用户/题目变化的变量区（置于 user 消息开头）。
+ */
+export interface PromptParts {
+  systemPrompt: string;
+  userContext: string;
+}
+
+/**
+ * Generates the analyze image prompt（整串版，静态段+变量区渲染拼接，兼容历史调用方）
+ * @param language - Target language for analysis ('zh' or 'en')
+ * @param grade - Optional grade level (7-9:初中, 10-12:高中) for cumulative tag filtering
+ * @param options - Optional customizations
+ */
+export function generateAnalyzePrompt(
+  language: 'zh' | 'en',
+  grade?: 7 | 8 | 9 | 10 | 11 | 12 | null,
+  subject?: string | null,
+  options?: PromptOptions,
+  gradeSemester?: string | null
+): string {
+  const { langInstruction, tagsSection } = buildAnalyzeVariables(language, grade, subject, options);
   const template = options?.customTemplate || DEFAULT_ANALYZE_TEMPLATE;
 
   return replaceVariables(template, {
@@ -426,7 +470,77 @@ ${englishTagsString}`;
 }
 
 /**
- * Generates the "similar question" prompt
+ * Generates the analyze image prompt（缓存友好拆分版）
+ * 自定义模板无法安全拆分，降级为整体放入 systemPrompt（与历史行为一致，仅损失缓存收益）。
+ */
+export function generateAnalyzePromptParts(
+  language: 'zh' | 'en',
+  grade?: 7 | 8 | 9 | 10 | 11 | 12 | null,
+  subject?: string | null,
+  options?: PromptOptions,
+  gradeSemester?: string | null
+): PromptParts {
+  if (options?.customTemplate) {
+    return { systemPrompt: generateAnalyzePrompt(language, grade, subject, options, gradeSemester), userContext: '' };
+  }
+  const { langInstruction, tagsSection } = buildAnalyzeVariables(language, grade, subject, options);
+
+  return {
+    systemPrompt: replaceVariables(ANALYZE_STATIC_TEMPLATE, { language_instruction: langInstruction }).trim(),
+    userContext: replaceVariables(ANALYZE_CONTEXT_TEMPLATE, {
+      error_category_instruction: buildErrorCategoryInstruction(subject),
+      knowledge_points_list: tagsSection,
+      grade_instruction: generateGradeInstruction(gradeSemester),
+      provider_hints: options?.providerHints || ''
+    }).trim()
+  };
+}
+
+/**
+ * Generates the "similar question" prompt（缓存友好拆分版）
+ * 原题/知识点/难度等变量全部进入 userContext，systemPrompt 保持全局稳定以命中前缀缓存。
+ * 自定义模板时整体放入 systemPrompt，userContext 仍承载题目信息（与历史“system 全量 + user 含原题”行为一致）。
+ */
+export function generateSimilarQuestionPromptParts(
+  language: 'zh' | 'en',
+  originalQuestion: string,
+  knowledgePoints: string[],
+  difficulty: 'easy' | 'medium' | 'hard' | 'harder' = 'medium',
+  options?: PromptOptions,
+  gradeSemester?: string | null,
+  mistakeHint?: string
+): PromptParts {
+  const langInstruction = language === 'zh'
+    ? "IMPORTANT: Provide the output based on the 'Original Question' language. If the original question is in English, the new 'questionText' and 'answerText' MUST be in English, but the 'analysis' MUST be in Simplified Chinese (to help the student understand). If the original is in Chinese, everything MUST be in Simplified Chinese."
+    : "Please ensure the generated question is in English.";
+
+  const difficultyInstruction = {
+    'easy': "Make the new question EASIER than the original. Use simpler numbers and more direct concepts.",
+    'medium': "Keep the difficulty SIMILAR to the original question.",
+    'hard': "Make the new question HARDER than the original. Combine multiple concepts or use more complex numbers.",
+    'harder': "Make the new question MUCH HARDER (Challenge Level). Require deeper understanding and multi-step reasoning."
+  }[difficulty];
+
+  const taskVariables = {
+    difficulty_level: difficulty.toUpperCase(),
+    difficulty_instruction: difficultyInstruction,
+    original_question: originalQuestion.replace(/"/g, '\\"').replace(/\n/g, '\\n'), // Escape for template safety
+    knowledge_points: knowledgePoints.join(", "),
+    mistake_hint: mistakeHint || '',
+    grade_instruction: generateGradeInstruction(gradeSemester),
+    provider_hints: options?.providerHints || ''
+  };
+
+  const userContext = replaceVariables(SIMILAR_CONTEXT_TEMPLATE, taskVariables).trim();
+  const systemPrompt = options?.customTemplate
+    ? replaceVariables(options.customTemplate, { language_instruction: langInstruction, ...taskVariables }).trim()
+    : replaceVariables(SIMILAR_STATIC_TEMPLATE, { language_instruction: langInstruction }).trim();
+
+  return { systemPrompt, userContext };
+}
+
+/**
+ * Generates the "similar question" prompt（整串版，静态段+变量区渲染拼接，兼容历史调用方）
  * @param language - Target language ('zh' or 'en')
  * @param originalQuestion - The original question text
  * @param knowledgePoints - Knowledge points to test
@@ -442,45 +556,19 @@ export function generateSimilarQuestionPrompt(
   gradeSemester?: string | null,
   mistakeHint?: string
 ): string {
-  const langInstruction = language === 'zh'
-    ? "IMPORTANT: Provide the output based on the 'Original Question' language. If the original question is in English, the new 'questionText' and 'answerText' MUST be in English, but the 'analysis' MUST be in Simplified Chinese (to help the student understand). If the original is in Chinese, everything MUST be in Simplified Chinese."
-    : "Please ensure the generated question is in English.";
-
-  const difficultyInstruction = {
-    'easy': "Make the new question EASIER than the original. Use simpler numbers and more direct concepts.",
-    'medium': "Keep the difficulty SIMILAR to the original question.",
-    'hard': "Make the new question HARDER than the original. Combine multiple concepts or use more complex numbers.",
-    'harder': "Make the new question MUCH HARDER (Challenge Level). Require deeper understanding and multi-step reasoning."
-  }[difficulty];
-
-  const template = options?.customTemplate || DEFAULT_SIMILAR_TEMPLATE;
-
-  return replaceVariables(template, {
-    difficulty_level: difficulty.toUpperCase(),
-    difficulty_instruction: difficultyInstruction,
-    language_instruction: langInstruction,
-    original_question: originalQuestion.replace(/"/g, '\\"').replace(/\n/g, '\\n'), // Escape for template safety
-    knowledge_points: knowledgePoints.join(", "),
-    mistake_hint: mistakeHint || '',
-    grade_instruction: generateGradeInstruction(gradeSemester),
-    provider_hints: options?.providerHints || ''
-  }).trim();
+  const { systemPrompt, userContext } = generateSimilarQuestionPromptParts(
+    language, originalQuestion, knowledgePoints, difficulty, options, gradeSemester, mistakeHint
+  );
+  return `${systemPrompt}\n\n${userContext}`;
 }
 
 /**
- * 重新解题提示词模板
- * 用于根据校正后的题目文本重新生成答案和解析
+ * 重新解题任务 system 静态段：全局稳定（仅 {{language_instruction}} 按语言二分），置于请求最前以命中前缀缓存。
  */
-export const DEFAULT_REANSWER_TEMPLATE = `【角色与核心任务 (ROLE AND CORE TASK)】
+const REANSWER_STATIC_TEMPLATE = `【角色与核心任务 (ROLE AND CORE TASK)】
 你是一位经验丰富的专业教师。用户已经提供了一道**校正后的题目文本**，请你为这道题目提供正确的答案和详细的解析。
 
 {{language_instruction}}
-
-【题目内容 (QUESTION)】
-{{question_text}}
-
-【学科提示 (SUBJECT HINT)】
-{{subject_hint}}
 
 【核心输出要求 (OUTPUT REQUIREMENTS)】
 你的响应输出**必须严格遵循以下自定义标签格式**。**严禁**使用 JSON 或 Markdown 代码块。
@@ -517,28 +605,25 @@ export const DEFAULT_REANSWER_TEMPLATE = `【角色与核心任务 (ROLE AND COR
 【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
 1. **格式严格**：必须严格包含上述 6 个 XML 标签，不要输出其他内容。
 2. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。
-3. **题目不变**：不要修改或重复题目内容，只提供答案和解析。
-
-{{grade_instruction}}
-{{provider_hints}}`;
+3. **题目不变**：不要修改或重复题目内容，只提供答案和解析。`;
 
 /**
- * GeoGebra 动态演示生成提示词
- * 用于判断题目是否可以用 GeoGebra 演示，以及生成对应的 GeoGebra 命令
+ * 重新解题任务的变量区（学科提示/题目内容随请求变化），渲染后置于 user 消息开头（图片之前）。
  */
-export const DEFAULT_GEOGEBRA_PROMPT = `【角色与核心任务 (ROLE AND CORE TASK)】
-你是一位专业的 GeoGebra 数学可视化专家。你的任务是分析一道数学题目，判断它是否适合用 GeoGebra 进行动态可视化演示。如果适合，生成可以直接在 GeoGebra 中执行的命令。
+const REANSWER_CONTEXT_TEMPLATE = `【学科提示 (SUBJECT HINT)】
+{{subject_hint}}
 
 【题目内容 (QUESTION)】
 {{question_text}}
+{{grade_instruction}}{{provider_hints}}`;
 
-【答案内容 (ANSWER)】
-{{answer_text}}
+export const DEFAULT_REANSWER_TEMPLATE = `${REANSWER_STATIC_TEMPLATE}\n\n${REANSWER_CONTEXT_TEMPLATE}`;
 
-【解析内容 (ANALYSIS)】
-{{analysis}}
-
-{{error_feedback}}
+/**
+ * GeoGebra 任务 system 静态段：判断标准/命令规范/输出格式全局稳定，置于请求最前以命中前缀缓存。
+ */
+const GEOGEBRA_STATIC_TEMPLATE = `【角色与核心任务 (ROLE AND CORE TASK)】
+你是一位专业的 GeoGebra 数学可视化专家。你的任务是分析一道数学题目，判断它是否适合用 GeoGebra 进行动态可视化演示。如果适合，生成可以直接在 GeoGebra 中执行的命令。
 
 【判断标准 (SUITABILITY CRITERIA)】
 适合用 GeoGebra 演示的题目类型：
@@ -621,7 +706,46 @@ export const DEFAULT_GEOGEBRA_PROMPT = `【角色与核心任务 (ROLE AND CORE 
    f. 坐标轴范围 (setCoordSystem) 必须在所有绘图命令之前设置`;
 
 /**
- * 生成 GeoGebra 分析提示词
+ * GeoGebra 任务的变量区：题目/答案/解析随每次请求变化，渲染后作为 user 消息。
+ */
+const GEOGEBRA_CONTEXT_TEMPLATE = `【题目内容 (QUESTION)】
+{{question_text}}
+
+【答案内容 (ANSWER)】
+{{answer_text}}
+
+【解析内容 (ANALYSIS)】
+{{analysis}}
+{{error_feedback}}`;
+
+export const DEFAULT_GEOGEBRA_PROMPT = `${GEOGEBRA_STATIC_TEMPLATE}\n\n${GEOGEBRA_CONTEXT_TEMPLATE}`;
+
+/**
+ * 生成 GeoGebra 分析提示词（缓存友好拆分版）：题目内容等变量进入 userContext，systemPrompt 全局稳定以命中前缀缓存。
+ */
+export function generateGeogebraPromptParts(
+    questionText: string,
+    answerText: string,
+    analysis: string,
+    previousErrors?: string
+): PromptParts {
+    const errorFeedback = previousErrors?.trim()
+        ? `【上次执行错误 (PREVIOUS ERRORS)】\n上次生成的 GeoGebra 命令执行时出现了以下错误，请分析错误原因并在这次生成中修正：\n${previousErrors}\n\n【错误修正要求 (ERROR FIX RULES)】\n请严格按以下步骤修正：\n1. 检查每条失败命令，确认是语法错误、变量未定义还是命令名称错误\n2. 如果是"未定义变量X"，在命令之前添加定义该变量的命令，或调整命令顺序\n3. 如果是"未知的指令"，替换为 GeoGebra 官方支持的等效命令（如 Line(P, l) 替代 ParallelLine(P, l)）\n4. 重新排列所有命令的顺序，确保每个对象在使用前已定义\n5. 生成后再次逐条检查：每条命令的语法、变量引用、依赖关系是否正确`
+        : '';
+
+    return {
+        systemPrompt: GEOGEBRA_STATIC_TEMPLATE.trim(),
+        userContext: replaceVariables(GEOGEBRA_CONTEXT_TEMPLATE, {
+            question_text: questionText,
+            answer_text: answerText,
+            analysis: analysis,
+            error_feedback: errorFeedback
+        }).trim()
+    };
+}
+
+/**
+ * 生成 GeoGebra 分析提示词（整串版，静态段+变量区渲染拼接，兼容历史调用方）
  */
 export function generateGeogebraPrompt(
     questionText: string,
@@ -629,27 +753,46 @@ export function generateGeogebraPrompt(
     analysis: string,
     previousErrors?: string
 ): string {
-    let prompt = DEFAULT_GEOGEBRA_PROMPT.replace(
-        "{{question_text}}",
-        questionText
-    )
-        .replace("{{answer_text}}", answerText)
-        .replace("{{analysis}}", analysis);
-
-    if (previousErrors?.trim()) {
-        prompt = prompt.replace(
-            "{{error_feedback}}",
-            `【上次执行错误 (PREVIOUS ERRORS)】\n上次生成的 GeoGebra 命令执行时出现了以下错误，请分析错误原因并在这次生成中修正：\n${previousErrors}\n\n【错误修正要求 (ERROR FIX RULES)】\n请严格按以下步骤修正：\n1. 检查每条失败命令，确认是语法错误、变量未定义还是命令名称错误\n2. 如果是"未定义变量X"，在命令之前添加定义该变量的命令，或调整命令顺序\n3. 如果是"未知的指令"，替换为 GeoGebra 官方支持的等效命令（如 Line(P, l) 替代 ParallelLine(P, l)）\n4. 重新排列所有命令的顺序，确保每个对象在使用前已定义\n5. 生成后再次逐条检查：每条命令的语法、变量引用、依赖关系是否正确`
-        );
-    } else {
-        prompt = prompt.replace("{{error_feedback}}", "");
-    }
-
-    return prompt;
+    const { systemPrompt, userContext } = generateGeogebraPromptParts(questionText, answerText, analysis, previousErrors);
+    return `${systemPrompt}\n\n${userContext}`;
 }
 
 /**
- * 生成重新解题提示词
+ * 生成重新解题提示词（缓存友好拆分版）：题目内容等变量进入 userContext，systemPrompt 全局稳定以命中前缀缓存。
+ * 自定义模板时整体放入 systemPrompt（兼容历史行为，仅损失缓存收益）。
+ */
+export function generateReanswerPromptParts(
+  language: 'zh' | 'en',
+  questionText: string,
+  subject?: string | null,
+  options?: PromptOptions,
+  gradeSemester?: string | null
+): PromptParts {
+  const langInstruction = language === 'zh'
+    ? "IMPORTANT: 解析必须使用简体中文。如果题目是英文，答案保持英文，但解析用中文。"
+    : "Please ensure all text fields are in English.";
+
+  const subjectHint = subject
+    ? `本题学科：${subject}`
+    : "请根据题目内容判断学科。";
+
+  const taskVariables = {
+    question_text: questionText,
+    subject_hint: subjectHint,
+    grade_instruction: generateGradeInstruction(gradeSemester),
+    provider_hints: options?.providerHints || ''
+  };
+
+  const userContext = replaceVariables(REANSWER_CONTEXT_TEMPLATE, taskVariables).trim();
+  const systemPrompt = options?.customTemplate
+    ? replaceVariables(options.customTemplate, { language_instruction: langInstruction, ...taskVariables }).trim()
+    : replaceVariables(REANSWER_STATIC_TEMPLATE, { language_instruction: langInstruction }).trim();
+
+  return { systemPrompt, userContext };
+}
+
+/**
+ * 生成重新解题提示词（整串版，静态段+变量区渲染拼接，兼容历史调用方）
  * @param language - 语言 ('zh' 或 'en')
  * @param questionText - 校正后的题目文本
  * @param subject - 学科提示（可选）
@@ -662,29 +805,52 @@ export function generateReanswerPrompt(
   options?: PromptOptions,
   gradeSemester?: string | null
 ): string {
-  const langInstruction = language === 'zh'
-    ? "IMPORTANT: 解析必须使用简体中文。如果题目是英文，答案保持英文，但解析用中文。"
-    : "Please ensure all text fields are in English.";
-
-  const subjectHint = subject
-    ? `本题学科：${subject}`
-    : "请根据题目内容判断学科。";
-
-  const template = options?.customTemplate || DEFAULT_REANSWER_TEMPLATE;
-
-  return replaceVariables(template, {
-    language_instruction: langInstruction,
-    question_text: questionText,
-    subject_hint: subjectHint,
-    grade_instruction: generateGradeInstruction(gradeSemester),
-    provider_hints: options?.providerHints || ''
-  }).trim();
+  const { systemPrompt, userContext } = generateReanswerPromptParts(language, questionText, subject, options, gradeSemester);
+  return `${systemPrompt}\n\n${userContext}`;
 }
 
 /**
  * 批量补全元数据提示词（B4：为历史/导入错题补 标签+题型+错因）
+ * system 静态段：角色与 XML 输出格式全局稳定，置于请求最前以命中前缀缓存。
  */
-export const DEFAULT_BACKFILL_PROMPT = `你是一位跨学科教育专家。请分析以下已收录的错题，补全它的知识点标签、题型，以及（如果有学生错误作答）结构化错因。
+const BACKFILL_STATIC_TEMPLATE = `你是一位跨学科教育专家。请分析以下已收录的错题，补全它的知识点标签、题型，以及（如果有学生错误作答）结构化错因。
+
+【核心输出要求 (OUTPUT REQUIREMENTS)】
+你的响应输出**必须严格遵循以下自定义标签格式**。**严禁**使用 JSON 或 Markdown 代码块。
+
+请严格按照以下结构输出内容（不要包含任何其他文字）：
+
+<knowledge_points>
+在此处填写该题考查的知识点，使用逗号分隔，最多 5 个。必须从【知识点标签列表】中选择。
+</knowledge_points>
+
+<question_type>
+填写以下值之一：choice（选择题）、fill（填空题）、solve（解答题/计算题/主观题）、judge（判断题）。
+</question_type>
+
+<error_category>
+分析学生的主要错误原因，按照【错因分类说明】的要求填写 code。
+</error_category>
+
+<secondary_error_categories>
+次要错误原因，最多 2 个，用逗号分隔填写 code；没有则留空。
+</secondary_error_categories>
+
+【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
+1. **格式严格**：必须严格包含上述 4 个 XML 标签，不要输出其他内容。
+2. **不要猜测**：没有学生错误作答时，error_category 必须填 unknown。`;
+
+/**
+ * 批量补全任务的变量区：按「同学科稳定（学科提示/标签列表/错因说明）→ 每题变化（题目内容）」排序，
+ * 批量补全同学科错题时 user 前缀可继续命中缓存。
+ */
+const BACKFILL_CONTEXT_TEMPLATE = `{{subject_hint}}
+
+【知识点标签列表 (KNOWLEDGE POINT LIST)】
+{{knowledge_points_list}}
+
+【错因分类说明 (ERROR CATEGORY LIST)】
+{{error_category_instruction}}
 
 【题目 (QUESTION)】
 {{question_text}}
@@ -696,34 +862,9 @@ export const DEFAULT_BACKFILL_PROMPT = `你是一位跨学科教育专家。请�
 {{analysis}}
 
 【学生错误作答 (WRONG ANSWER)】
-{{wrong_answer_text}}
+{{wrong_answer_text}}`;
 
-{{subject_hint}}
-
-【核心输出要求 (OUTPUT REQUIREMENTS)】
-你的响应输出**必须严格遵循以下自定义标签格式**。**严禁**使用 JSON 或 Markdown 代码块。
-
-请严格按照以下结构输出内容（不要包含任何其他文字）：
-
-<knowledge_points>
-在此处填写该题考查的知识点，使用逗号分隔，最多 5 个。{{knowledge_points_list}}
-</knowledge_points>
-
-<question_type>
-填写以下值之一：choice（选择题）、fill（填空题）、solve（解答题/计算题/主观题）、judge（判断题）。
-</question_type>
-
-<error_category>
-{{error_category_instruction}}
-</error_category>
-
-<secondary_error_categories>
-次要错误原因，最多 2 个，用逗号分隔填写 code；没有则留空。
-</secondary_error_categories>
-
-【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
-1. **格式严格**：必须严格包含上述 4 个 XML 标签，不要输出其他内容。
-2. **不要猜测**：没有学生错误作答时，error_category 必须填 unknown。`;
+export const DEFAULT_BACKFILL_PROMPT = `${BACKFILL_STATIC_TEMPLATE}\n\n${BACKFILL_CONTEXT_TEMPLATE}`;
 
 export interface BackfillPromptParams {
   questionText: string;
@@ -734,7 +875,10 @@ export interface BackfillPromptParams {
   tagList?: string; // 可注入的候选标签列表
 }
 
-export function generateBackfillPrompt(params: BackfillPromptParams): string {
+/**
+ * 生成批量补全提示词（缓存友好拆分版）：题目内容等变量进入 userContext，systemPrompt 全局稳定以命中前缀缓存。
+ */
+export function generateBackfillPromptParts(params: BackfillPromptParams): PromptParts {
   const subjectHint = params.subject
     ? `本题学科：${params.subject}`
     : "请根据题目内容判断学科。";
@@ -744,12 +888,24 @@ export function generateBackfillPrompt(params: BackfillPromptParams): string {
     ? `根据学生的错误作答分析主要错因，${buildErrorCategoryInstruction(params.subject)}`
     : "本题没有学生错误作答记录，直接填写 unknown。";
 
-  return DEFAULT_BACKFILL_PROMPT.replace('{{question_text}}', params.questionText)
-    .replace('{{answer_text}}', params.answerText || '（无）')
-    .replace('{{analysis}}', params.analysis || '（无）')
-    .replace('{{wrong_answer_text}}', hasWrong ? params.wrongAnswerText! : '（无）')
-    .replace('{{subject_hint}}', subjectHint)
-    .replace('{{knowledge_points_list}}', params.tagList || '')
-    .replace('{{error_category_instruction}}', errorCategoryInstruction)
-    .trim();
+  return {
+    systemPrompt: BACKFILL_STATIC_TEMPLATE.trim(),
+    userContext: replaceVariables(BACKFILL_CONTEXT_TEMPLATE, {
+      question_text: params.questionText,
+      answer_text: params.answerText || '（无）',
+      analysis: params.analysis || '（无）',
+      wrong_answer_text: hasWrong ? params.wrongAnswerText! : '（无）',
+      subject_hint: subjectHint,
+      knowledge_points_list: params.tagList || '',
+      error_category_instruction: errorCategoryInstruction
+    }).trim()
+  };
+}
+
+/**
+ * 生成批量补全提示词（整串版，静态段+变量区渲染拼接，兼容历史调用方）
+ */
+export function generateBackfillPrompt(params: BackfillPromptParams): string {
+  const { systemPrompt, userContext } = generateBackfillPromptParts(params);
+  return `${systemPrompt}\n\n${userContext}`;
 }

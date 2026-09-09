@@ -5,8 +5,13 @@
 import { describe, it, expect } from 'vitest';
 import {
     generateAnalyzePrompt,
+    generateAnalyzePromptParts,
     generateSimilarQuestionPrompt,
+    generateSimilarQuestionPromptParts,
     generateReanswerPrompt,
+    generateReanswerPromptParts,
+    generateGeogebraPromptParts,
+    generateBackfillPromptParts,
     generateGradeInstruction,
     gradeSemesterToDisplayName,
     gradeSemesterToGradeNumber,
@@ -343,6 +348,128 @@ describe('AI Prompts', () => {
         it('analyze 提示词不应包含未替换的 grade_instruction 占位符', () => {
             const prompt = generateAnalyzePrompt('zh', 8, '数学', undefined, '初二上');
             expect(prompt).not.toContain('{{grade_instruction}}');
+        });
+    });
+
+    describe('缓存前缀拆分', () => {
+        it('analyze：不同学科/年级的 systemPrompt 应逐字节一致（前缀缓存命中）', () => {
+            const a = generateAnalyzePromptParts('zh', 7, '数学', {
+                prefetchedMathTags: ['有理数', '整式'],
+            }, '初一上');
+            const b = generateAnalyzePromptParts('zh', 10, '物理', {
+                prefetchedPhysicsTags: ['力学'],
+            }, '高一');
+            expect(a.systemPrompt).toBe(b.systemPrompt);
+            expect(a.systemPrompt.length).toBeGreaterThan(500);
+        });
+
+        it('analyze：标签列表/错因分类/学历约束进入 userContext，system 只留静态指令', () => {
+            const { systemPrompt, userContext } = generateAnalyzePromptParts('zh', 8, '数学', {
+                prefetchedMathTags: ['有理数'],
+            }, '初二上');
+            expect(userContext).toContain('有理数');
+            expect(userContext).toContain('学历约束');
+            expect(userContext).toContain('初中二年级');
+            expect(systemPrompt).not.toContain('有理数');
+            expect(systemPrompt).not.toContain('学历约束');
+            expect(systemPrompt).toContain('<question_text>');
+            expect(systemPrompt).toContain('表格处理规则');
+            expect(systemPrompt).not.toContain('{{');
+        });
+
+        it('analyze：zh 与 en 的 systemPrompt 允许不同（语言分叉预期）', () => {
+            const zh = generateAnalyzePromptParts('zh', null, null);
+            const en = generateAnalyzePromptParts('en', null, null);
+            expect(zh.systemPrompt).not.toBe(en.systemPrompt);
+        });
+
+        it('analyze：自定义模板时降级为整体 system、userContext 为空（兼容历史行为）', () => {
+            const { systemPrompt, userContext } = generateAnalyzePromptParts('zh', null, null, {
+                customTemplate: '自定义 {{language_instruction}} 标签 {{knowledge_points_list}}',
+            }, '初一上');
+            expect(systemPrompt).toContain('自定义');
+            expect(systemPrompt).toContain('Chinese');
+            expect(systemPrompt).not.toContain('{{');
+            expect(userContext).toBe('');
+        });
+
+        it('similar：不同原题/难度/错因提示的 systemPrompt 应逐字节一致（前缀缓存命中）', () => {
+            const a = generateSimilarQuestionPromptParts('zh', '题目A的内容', ['知识点A']);
+            const b = generateSimilarQuestionPromptParts('zh', '题目B的内容', ['知识点B'], 'hard', undefined, '高一', '注意审题');
+            expect(a.systemPrompt).toBe(b.systemPrompt);
+            expect(a.systemPrompt.length).toBeGreaterThan(500);
+        });
+
+        it('similar：原题/知识点/难度/学历约束进入 userContext，system 不含题目信息', () => {
+            const { systemPrompt, userContext } = generateSimilarQuestionPromptParts('zh', '1+1=?', ['算术'], 'hard', undefined, '初二上', '注意审题偏差');
+            expect(userContext).toContain('1+1=?');
+            expect(userContext).toContain('算术');
+            expect(userContext).toContain('HARD');
+            expect(userContext).toContain('学历约束');
+            expect(userContext).toContain('注意审题偏差');
+            expect(systemPrompt).not.toContain('1+1=?');
+            expect(systemPrompt).not.toContain('算术');
+            expect(systemPrompt).not.toContain('{{');
+        });
+
+        it('similar：静态段 + 变量区拼合后与整串版语义一致', () => {
+            const parts = generateSimilarQuestionPromptParts('zh', '原题X', ['知识点X'], 'medium', undefined, '初一上');
+            const whole = generateSimilarQuestionPrompt('zh', '原题X', ['知识点X'], 'medium', undefined, '初一上');
+            expect(`${parts.systemPrompt}\n\n${parts.userContext}`).toBe(whole);
+        });
+
+        it('reanswer：不同题目/学科的 systemPrompt 应逐字节一致（前缀缓存命中）', () => {
+            const a = generateReanswerPromptParts('zh', '求解 2x + 3 = 7', '数学', undefined, '初二上');
+            const b = generateReanswerPromptParts('zh', '完形填空原文...', '英语', undefined, '高一');
+            expect(a.systemPrompt).toBe(b.systemPrompt);
+            expect(a.systemPrompt.length).toBeGreaterThan(500);
+        });
+
+        it('reanswer：题目内容/学科提示进入 userContext，system 不含', () => {
+            const { systemPrompt, userContext } = generateReanswerPromptParts('zh', '求解 2x + 3 = 7', '数学', undefined, '初二上');
+            expect(userContext).toContain('求解 2x + 3 = 7');
+            expect(userContext).toContain('本题学科：数学');
+            expect(userContext).toContain('学历约束');
+            expect(systemPrompt).not.toContain('求解 2x');
+            expect(systemPrompt).toContain('<answer_text>');
+            expect(systemPrompt).not.toContain('{{');
+        });
+
+        it('geogebra：不同题目内容的 systemPrompt 应逐字节一致（前缀缓存命中）', () => {
+            const a = generateGeogebraPromptParts('y=x^2', '顶点(0,0)', '配方法');
+            const b = generateGeogebraPromptParts('圆的方程', '半径 3', '标准方程', '上次报错：未定义变量 f');
+            expect(a.systemPrompt).toBe(b.systemPrompt);
+            expect(a.systemPrompt.length).toBeGreaterThan(500);
+        });
+
+        it('geogebra：题目/答案/解析/错误反馈进入 userContext', () => {
+            const { systemPrompt, userContext } = generateGeogebraPromptParts('y=x^2', '顶点(0,0)', '配方法', '未知的指令 ParallelLine');
+            expect(userContext).toContain('y=x^2');
+            expect(userContext).toContain('配方法');
+            expect(userContext).toContain('上次执行错误');
+            expect(userContext).toContain('ParallelLine');
+            expect(systemPrompt).not.toContain('y=x^2');
+            expect(systemPrompt).not.toContain('{{');
+        });
+
+        it('backfill：不同题目内容的 systemPrompt 应逐字节一致（前缀缓存命中）', () => {
+            const a = generateBackfillPromptParts({ questionText: '题目A', subject: '数学', tagList: '"有理数"' });
+            const b = generateBackfillPromptParts({ questionText: '题目B', answerText: '答案B', analysis: '解析B', wrongAnswerText: '错解B', subject: '物理', tagList: '"力学"' });
+            expect(a.systemPrompt).toBe(b.systemPrompt);
+            expect(a.systemPrompt.length).toBeGreaterThan(300);
+        });
+
+        it('backfill：题目内容进入 userContext 末段，学科/标签/错因说明在前（批量场景 user 前缀稳定）', () => {
+            const { systemPrompt, userContext } = generateBackfillPromptParts({
+                questionText: '题目内容X',
+                subject: '数学',
+                tagList: '"有理数", "整式"',
+            });
+            expect(userContext.indexOf('有理数')).toBeLessThan(userContext.indexOf('题目内容X'));
+            expect(userContext).toContain('本题学科：数学');
+            expect(systemPrompt).not.toContain('题目内容X');
+            expect(systemPrompt).toContain('<knowledge_points>');
+            expect(systemPrompt).not.toContain('{{');
         });
     });
 
