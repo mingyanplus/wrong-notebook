@@ -399,7 +399,7 @@ export class OpenAIProvider implements AIService {
             subject: subject || 'auto',
             hasImage: !!imageBase64
         }, 'Reanswer Question Request');
-        logger.debug({ prompt }, 'Full prompt');
+        logger.debug({ systemPrompt, userContext }, 'Full prompt');
 
         try {
             // 根据是否有图片构建不同的消息内容：变量区文本在前，图片在后

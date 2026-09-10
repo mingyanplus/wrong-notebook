@@ -326,7 +326,7 @@ export class GeminiProvider implements AIService {
             subject: subject || 'auto',
             hasImage: !!imageBase64
         }, 'Reanswer Question Request');
-        logger.debug({ prompt }, 'Full prompt');
+        logger.debug({ systemPrompt, userContext }, 'Full prompt');
 
         try {
             // 用户消息：变量区文本（学科提示/题目内容）在前，图片在后
