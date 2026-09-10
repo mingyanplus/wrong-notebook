@@ -160,9 +160,6 @@ jobs:
             type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
             type=sha,prefix=sha-
 
-      - name: Set up QEMU (Enable multi-arch)
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -171,7 +168,7 @@ jobs:
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
