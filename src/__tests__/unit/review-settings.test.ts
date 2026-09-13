@@ -33,6 +33,10 @@ describe('parseReviewSettings', () => {
         expect(parseReviewSettings('{"errorCategories":"stuck"}').errorCategories).toBeNull();
     });
 
+    it('应接受「未分类」哨兵（复习时同时包含没录错因的题）', () => {
+        expect(parseReviewSettings('{"errorCategories":["stuck","uncategorized"]}').errorCategories).toEqual(['stuck', 'uncategorized']);
+    });
+
     it('序列化-解析回环应无损', () => {
         const s = { dailyLimit: 15, errorCategories: ['concept', 'stuck'] };
         expect(parseReviewSettings(serializeReviewSettings(s))).toEqual(s);

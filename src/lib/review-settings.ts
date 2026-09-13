@@ -17,7 +17,10 @@ export const DEFAULT_REVIEW_SETTINGS: ReviewSettings = { dailyLimit: null, error
 /** 每日复习数量上限（校验与接口兜底共用同一约束，避免两处硬编码漂移） */
 export const MAX_DAILY_LIMIT = 200;
 
-const validCodes = new Set<string>(ERROR_CATEGORIES.map((c) => c.code as string));
+/** 勾选「未分类」时的哨兵值：复习错因筛选同时包含没有错因的题（如做不来但当时没录错因） */
+export const UNCATEGORIZED_SENTINEL = "uncategorized";
+
+const validCodes = new Set<string>([...ERROR_CATEGORIES.map((c) => c.code as string), UNCATEGORIZED_SENTINEL]);
 
 /**
  * 解析复习设置（接受 JSON 字符串、对象、null/undefined；损坏/缺省时回退默认值，无效字段静默丢弃）。

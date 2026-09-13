@@ -1,7 +1,7 @@
 /**
  * 变式自动生成配置（User.variantSettings JSON 的解析与校验）：
  * enabled=错题入库后自动生成；perDifficulty=各难度数量（0 表示该档不生成）。
- * 难度语义映射：easy=巩固、medium=适中、hard=困难、harder=挑战。
+ * 难度语义映射：easy=简单、medium=适中、hard=困难、harder=挑战。
  */
 
 import type { DifficultyLevel } from "@/lib/ai/types";
@@ -26,7 +26,7 @@ export const DEFAULT_VARIANT_SETTINGS: VariantSettings = defaultVariantSettings(
 
 /** 界面用的难度展示（顺序即 UI 顺序） */
 export const DIFFICULTY_LABELS: Record<DifficultyLevel, string> = {
-    easy: "巩固",
+    easy: "简单",
     medium: "适中",
     hard: "困难",
     harder: "挑战",

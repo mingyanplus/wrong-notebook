@@ -6,7 +6,7 @@ import { unauthorized, internalError } from "@/lib/api-errors";
 import { createLogger } from "@/lib/logger";
 import { parseImageMasks } from "@/lib/image-masks";
 import { parseLegacyKnowledgePoints } from "@/lib/knowledge-tags";
-import { parseReviewSettings, MAX_DAILY_LIMIT } from "@/lib/review-settings";
+import { parseReviewSettings, MAX_DAILY_LIMIT, UNCATEGORIZED_SENTINEL } from "@/lib/review-settings";
 
 const logger = createLogger('api:review:due');
 
@@ -45,8 +45,17 @@ export async function GET(req: Request) {
                 errorItem: {
                     userId,
                     ...(subjectId ? { subjectId } : {}),
-                    // 重点复习：勾选了错因类型时，只看这些错因的题（如"做不来"=stuck/method）
-                    ...(settings.errorCategories ? { errorCategory: { in: settings.errorCategories } } : {}),
+                    // 重点复习：勾选了错因类型时只看这些错因；勾选「未分类」时同时包含没录错因的题
+                    ...(settings.errorCategories
+                        ? settings.errorCategories.includes(UNCATEGORIZED_SENTINEL)
+                            ? {
+                                  OR: [
+                                      { errorCategory: { in: settings.errorCategories.filter((c) => c !== UNCATEGORIZED_SENTINEL) } },
+                                      { errorCategory: null },
+                                  ],
+                              }
+                            : { errorCategory: { in: settings.errorCategories } }
+                        : {}),
                 },
             },
             orderBy: [{ errorItem: { masteryLevel: 'asc' } }, { scheduledFor: 'asc' }],

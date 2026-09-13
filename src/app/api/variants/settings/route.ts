@@ -59,7 +59,7 @@ export async function PUT(req: Request) {
             where: { id: session.user.id },
             data: { variantSettings: serializeVariantSettings(settings) },
         });
-        return NextResponse.json({ settings });
+        return NextResponse.json(settings);
     } catch (error) {
         logger.error({ error }, 'Error saving variant settings');
         return internalError("Failed to save variant settings");

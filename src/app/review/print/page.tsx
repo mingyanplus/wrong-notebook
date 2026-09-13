@@ -55,6 +55,8 @@ function ReviewPrintContent() {
     const [variants, setVariants] = useState<VariantItem[]>([]);
     // 打印勾选：各难度附加变式数量（默认全 0 = 不附加）
     const [variantCounts, setVariantCounts] = useState<Record<string, number>>({});
+    // 原图显示比例（与错题本打印页同款滑杆），打印时同样生效
+    const [imageScale, setImageScale] = useState(55);
 
     useEffect(() => {
         const query = searchParams.toString();
@@ -168,6 +170,18 @@ function ReviewPrintContent() {
                             {t.inkCalibration?.filter || "红笔过滤"}
                         </label>
                         <InkCalibrationControls calibration={calibration} />
+                        {/* 图片比例：与错题本打印页同款 */}
+                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span className="whitespace-nowrap">{t.printPreview?.imageScale || "图片比例"}: {imageScale}%</span>
+                            <input
+                                type="range"
+                                min="30"
+                                max="100"
+                                value={imageScale}
+                                onChange={(e) => setImageScale(Number(e.target.value))}
+                                className="w-16 accent-primary cursor-pointer"
+                            />
+                        </label>
                         {/* 举一反三：从变式题库按难度/数量附加（在设置中开启自动生成后题库逐步充实） */}
                         <div
                             className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"
@@ -237,7 +251,8 @@ function ReviewPrintContent() {
                                                     options={redFilterOptions}
                                                     picking={picking}
                                                     onPick={pickFrom}
-                                                    className="mt-2 max-w-[55%]"
+                                                    className="mt-2"
+                                                    style={{ maxWidth: `${imageScale}%` }}
                                                 />
                                             )}
                                             {/* 作答留白 */}

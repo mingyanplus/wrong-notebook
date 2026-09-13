@@ -159,13 +159,18 @@ export function VariantSettingsSection() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" onClick={save} disabled={saving || !settings.enabled || serializeVariantSettings(settings) === serializeVariantSettings(baseline)}>
+                <Button
+                    type="button"
+                    size="sm"
+                    onClick={save}
+                    disabled={saving || serializeVariantSettings(settings) === serializeVariantSettings(baseline)}
+                >
                     {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     {saved
                         ? (t.settings?.general?.variant?.saved || "已保存")
                         : (t.settings?.general?.variant?.save || "保存变式设置")}
                 </Button>
-                <Button variant="outline" size="sm" onClick={backfill} disabled={backfilling || !settings.enabled}>
+                <Button type="button" variant="outline" size="sm" onClick={backfill} disabled={backfilling || !settings.enabled}>
                     {backfilling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <WandSparkles className="mr-2 h-4 w-4" />}
                     {t.settings?.general?.variant?.backfill || "为现有错题补齐"}
                 </Button>

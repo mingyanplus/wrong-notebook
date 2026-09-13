@@ -224,6 +224,7 @@ export function InkCalibrationControls({
     return (
         <>
             <Button
+                type="button"
                 variant="outline"
                 size={size}
                 onClick={() => setPicking((p) => !p)}
@@ -237,7 +238,7 @@ export function InkCalibrationControls({
                         : t.inkCalibration?.pick || "取色校准"}
             </Button>
             {inkSamples.length > 0 && !picking && (
-                <Button variant="ghost" size="sm" className="px-2 text-xs" onClick={reset}>
+                <Button type="button" variant="ghost" size="sm" className="px-2 text-xs" onClick={reset}>
                     {t.inkCalibration?.reset || "恢复默认"}
                 </Button>
             )}
@@ -274,13 +275,15 @@ interface MaskedOriginalImageProps {
     onPick?: (e: ReactMouseEvent<HTMLImageElement>, src: string) => void;
     /** 图片尺寸类（如 max-w 百分比） */
     className?: string;
+    /** 透传给图片的内联样式（如 maxWidth 比例调节） */
+    style?: CSSProperties;
 }
 
 /**
  * 原题图 + 去红 + 手写遮罩白块的组合（含取色接线）。
  * 打印遮罩必须带 print-color-adjust: exact，否则打印时白块透明失效——集中在此单一实现。
  */
-export function MaskedOriginalImage({ src, masks, redFilterEnabled, options, picking, onPick, className }: MaskedOriginalImageProps) {
+export function MaskedOriginalImage({ src, masks, redFilterEnabled, options, picking, onPick, className, style }: MaskedOriginalImageProps) {
     return (
         <div className="relative inline-block">
             <RedFilteredImage
@@ -289,6 +292,7 @@ export function MaskedOriginalImage({ src, masks, redFilterEnabled, options, pic
                 options={options}
                 alt="原题"
                 className={`block rounded border ${className ?? ""} ${picking ? "cursor-crosshair" : ""}`}
+                style={style}
                 onClick={picking && onPick ? (e) => onPick(e, src) : undefined}
             />
             {masks?.map((m, i) => (

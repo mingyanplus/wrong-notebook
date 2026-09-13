@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiClient } from "@/lib/api-client";
 import { ERROR_CATEGORIES } from "@/lib/error-categories";
-import { isSameReviewSettings, DEFAULT_REVIEW_SETTINGS } from "@/lib/review-settings";
+import { isSameReviewSettings, DEFAULT_REVIEW_SETTINGS, UNCATEGORIZED_SENTINEL } from "@/lib/review-settings";
 import type { ReviewSettings } from "@/lib/review-settings";
 
 const LIMIT_OPTIONS: Array<number | null> = [null, 5, 10, 15, 20, 30, 50];
@@ -116,10 +116,23 @@ export function ReviewSettingsSection() {
                             </label>
                         );
                     })}
+                    {/* 未分类：没录错因的题也纳入复习（如做不来但当时没标错因的存量题） */}
+                    <label
+                        className="flex items-center gap-1.5 rounded border bg-background px-2 py-1.5 text-xs cursor-pointer hover:border-primary/50"
+                        title={t.settings?.general?.review?.uncategorizedHint || "包含当时没有标注错因的题目（建议配合「批量补全」补齐错因）"}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={(settings.errorCategories ?? []).includes(UNCATEGORIZED_SENTINEL)}
+                            onChange={() => toggleCategory(UNCATEGORIZED_SENTINEL)}
+                            className="rounded border-gray-300 text-primary focus:ring-primary"
+                        />
+                        {t.settings?.general?.review?.uncategorized || "未分类"}
+                    </label>
                 </div>
             </div>
 
-            <Button size="sm" onClick={save} disabled={saving || isSameReviewSettings(settings, baseline)}>
+            <Button type="button" size="sm" onClick={save} disabled={saving || isSameReviewSettings(settings, baseline)}>
                 {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {saved
                     ? (t.settings?.general?.review?.saved || "已保存")

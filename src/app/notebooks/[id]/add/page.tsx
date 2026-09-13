@@ -6,6 +6,9 @@ import Link from "next/link";
 import { UploadZone } from "@/components/upload-zone";
 import { CorrectionEditor } from "@/components/correction-editor";
 import { ImageCropper } from "@/components/image-cropper";
+import { MultiQuestionCropper } from "@/components/multi-capture/multi-question-cropper";
+import { MultiResultsPanel } from "@/components/multi-capture/multi-results-panel";
+import { runMultiAnalyze, MultiAnalyzeItem } from "@/lib/multi-analyze";
 import { ParsedQuestion } from "@/lib/ai";
 import { apiClient } from "@/lib/api-client";
 import { parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from "@/lib/error-categories";
@@ -38,6 +41,19 @@ export default function AddErrorPage() {
     // Cropper state
     const [croppingImage, setCroppingImage] = useState<string | null>(null);
     const [isCropperOpen, setIsCropperOpen] = useState(false);
+
+    // 多题框选：模式与流程状态（与首页上传同款，subject 固定为当前错题本）
+    const [questionMode, setQuestionMode] = useState<"single" | "multi">("single");
+    const [multiStage, setMultiStage] = useState<"idle" | "analyzing" | "results">("idle");
+    const [multiItems, setMultiItems] = useState<MultiAnalyzeItem[]>([]);
+    const [multiBlobs, setMultiBlobs] = useState<Blob[]>([]);
+
+    const resetMultiState = () => {
+        setMultiStage("idle");
+        setMultiItems([]);
+        setMultiBlobs([]);
+        setAnalysisStep("idle");
+    };
 
     // Timeout Config
     const aiTimeout = config?.timeouts?.analyze || 180000;
@@ -109,6 +125,45 @@ export default function AddErrorPage() {
         setIsCropperOpen(false);
         const file = new File([croppedBlob], "cropped-image.jpg", { type: "image/jpeg" });
         handleAnalyze(file);
+    };
+
+    // 多题框选：逐框识别（subject 固定当前错题本，无需按首题学科匹配）
+    const handleMultiCropsComplete = async (blobs: Blob[]) => {
+        setIsCropperOpen(false);
+        setMultiBlobs(blobs);
+        setMultiItems([]);
+        setMultiStage("analyzing");
+        setAnalysisStep("analyzing");
+        frontendLogger.info("[AddMultiCapture]", "Starting multi-analyze", { count: blobs.length });
+
+        try {
+            const results = await runMultiAnalyze(blobs, {
+                language,
+                subjectId: notebookId,
+                timeout: aiTimeout,
+                onUpdate: setMultiItems,
+            });
+            setMultiItems(results);
+            setMultiStage("results");
+        } catch (error) {
+            frontendLogger.error('[AddMultiCapture]', 'Multi-analyze failed', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            resetMultiState();
+            alert(t.common.messages?.analysisFailed || 'Analysis failed');
+        } finally {
+            setAnalysisStep("idle");
+        }
+    };
+
+    const handleMultiFinished = (savedCount: number) => {
+        resetMultiState();
+        alert((t.common.multiCapture?.finishMessage || "本次共入库 {n} 题").replace("{n}", String(savedCount)));
+        router.push(`/notebooks/${notebookId}`);
+    };
+
+    const handleMultiDiscard = () => {
+        resetMultiState();
     };
 
     const handleAnalyze = async (file: File) => {
@@ -349,8 +404,22 @@ export default function AddErrorPage() {
         <main className="min-h-screen bg-background">
             <ProgressFeedback
                 status={analysisStep}
-                progress={progress}
-                message={getProgressMessage()}
+                progress={
+                    multiStage === "analyzing" && multiItems.length > 0
+                        ? Math.round(
+                              (multiItems.filter((i) => i.status === "success" || i.status === "failed").length /
+                                  multiItems.length) *
+                                  100
+                          )
+                        : progress
+                }
+                message={
+                    multiStage === "analyzing" && multiItems.length > 0
+                        ? `${t.common.multiCapture?.recognizing || "题目识别中"} ${
+                              multiItems.filter((i) => i.status === "success" || i.status === "failed").length
+                          }/${multiItems.length}`
+                        : getProgressMessage()
+                }
             />
 
             <div className="container mx-auto p-4 space-y-8 pb-20">
@@ -365,7 +434,7 @@ export default function AddErrorPage() {
                 </div>
 
                 {/* Main Content */}
-                {step === "upload" && (
+                {step === "upload" && multiStage !== "results" && (
                     <div className="space-y-4">
                         {/* Input mode tabs */}
                         <div className="flex gap-2 border-b">
@@ -394,7 +463,33 @@ export default function AddErrorPage() {
                         </div>
 
                         {inputMode === "image" ? (
-                            <UploadZone onImageSelect={onImageSelect} isAnalyzing={analysisStep !== 'idle'} />
+                            <div className="space-y-3">
+                                {/* 单题/多题模式切换（与首页上传同款） */}
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm text-muted-foreground">
+                                        {t.common.multiCapture?.modeLabel || "模式"}
+                                    </span>
+                                    <Button
+                                        type="button"
+                                        variant={questionMode === "single" ? "default" : "outline"}
+                                        size="sm"
+                                        disabled={multiStage !== "idle"}
+                                        onClick={() => setQuestionMode("single")}
+                                    >
+                                        {t.common.multiCapture?.modeSingle || "单题裁剪"}
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant={questionMode === "multi" ? "default" : "outline"}
+                                        size="sm"
+                                        disabled={multiStage !== "idle"}
+                                        onClick={() => setQuestionMode("multi")}
+                                    >
+                                        {t.common.multiCapture?.modeMulti || "多题框选"}
+                                    </Button>
+                                </div>
+                                <UploadZone onImageSelect={onImageSelect} isAnalyzing={analysisStep !== 'idle'} />
+                            </div>
                         ) : (
                             <TextInputZone
                                 onSubmit={handleTextSubmit}
@@ -403,6 +498,17 @@ export default function AddErrorPage() {
                             />
                         )}
                     </div>
+                )}
+
+                {multiStage === "results" && multiItems.length > 0 && (
+                    <MultiResultsPanel
+                        blobs={multiBlobs}
+                        items={multiItems}
+                        defaultSubjectId={notebookId}
+                        aiTimeout={aiTimeout}
+                        onFinished={handleMultiFinished}
+                        onDiscard={handleMultiDiscard}
+                    />
                 )}
 
                 {step === "review" && parsedData && (
@@ -417,12 +523,23 @@ export default function AddErrorPage() {
                 )}
             </div>
 
-            <ImageCropper
-                imageSrc={croppingImage || ""}
-                open={isCropperOpen}
-                onClose={() => setIsCropperOpen(false)}
-                onCropComplete={handleCropComplete}
-            />
+            {croppingImage && questionMode === "single" && (
+                <ImageCropper
+                    imageSrc={croppingImage}
+                    open={isCropperOpen}
+                    onClose={() => setIsCropperOpen(false)}
+                    onCropComplete={handleCropComplete}
+                />
+            )}
+
+            {croppingImage && questionMode === "multi" && (
+                <MultiQuestionCropper
+                    imageSrc={croppingImage}
+                    open={isCropperOpen}
+                    onClose={() => setIsCropperOpen(false)}
+                    onCropsComplete={handleMultiCropsComplete}
+                />
+            )}
         </main>
     );
 }
