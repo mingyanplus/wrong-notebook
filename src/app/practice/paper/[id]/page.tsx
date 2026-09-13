@@ -6,12 +6,15 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Loader2, Printer, ClipboardCheck, Trash2, Check, RotateCcw, ChevronDown, Eraser } from "lucide-react";
+import { Loader2, Printer, ClipboardCheck, Trash2, Check, RotateCcw, ChevronDown, Eraser, Droplet, Pipette } from "lucide-react";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiClient } from "@/lib/api-client";
 import { MarkdownRenderer } from "@/components/markdown-renderer";
 import { QUESTION_TYPES } from "@/lib/error-categories";
 import { ImageMaskEditor } from "@/components/practice/image-mask-editor";
+import { RedFilteredImage, getRedFilteredImage, sampleRedInkFromImage } from "@/components/red-filtered-image";
+import { redInkOptionsFromSample } from "@/lib/image-color-filter";
+import type { RedInkFilterOptions } from "@/lib/image-color-filter";
 import type { ImageMask } from "@/lib/image-masks";
 
 interface PaperQuestion {
@@ -61,6 +64,12 @@ export default function PaperDetailPage() {
     const [saving, setSaving] = useState(false);
     // 打印时原图处理模式：smart=按 requiresImage 分流（防作答痕迹泄题）/ hide=全部隐藏 / show=全部显示
     const [imageMode, setImageMode] = useState<"smart" | "hide" | "show">("smart");
+    // 红笔过滤：打印题目卷时自动滤除红笔订正痕迹（含答案卷供核对，保留原貌）；单题可豁免（题目本身含红色内容时）
+    const [redFilter, setRedFilter] = useState(true);
+    const [redExempt, setRedExempt] = useState<Record<string, boolean>>({});
+    // 取色校准：null=内置默认参数；取样后以该颜色为中心生成检测范围（拍摄色偏时用）
+    const [redFilterOptions, setRedFilterOptions] = useState<RedInkFilterOptions | null>(null);
+    const [picking, setPicking] = useState(false);
     const [maskEditing, setMaskEditing] = useState<PaperQuestion | null>(null);
 
     useEffect(() => {
@@ -71,6 +80,16 @@ export default function PaperDetailPage() {
                 .finally(() => setLoading(false));
         }
     }, [params.id, router]);
+
+    // 取色模式按 Esc 退出
+    useEffect(() => {
+        if (!picking) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setPicking(false);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [picking]);
 
     const sections = useMemo(() => {
         if (!paper) return [];
@@ -89,17 +108,52 @@ export default function PaperDetailPage() {
         [paper]
     );
 
-    const printHideImage = (q: PaperQuestion): boolean => {
-        if (imageMode === "hide") return true;
-        if (imageMode === "show") return false;
+    // 卷内是否有可打印原图（取色校准按钮显示条件）
+    const hasPrintImages = (paper?.questions ?? []).some((q) => q.originalImageUrl && !q.isVariant);
+
+    // 取色校准：点击原图上的红笔痕迹，以该颜色为中心重新生成全卷的检测范围
+    const handlePick = async (e: React.MouseEvent<HTMLImageElement>, src: string) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const sample = await sampleRedInkFromImage(
+            src,
+            (e.clientX - rect.left) / rect.width,
+            (e.clientY - rect.top) / rect.height
+        );
+        if (!sample) {
+            alert(t.paper?.pickColorFail || "该处未检测到明显的笔迹颜色，请点击红笔笔迹中心重试");
+            return;
+        }
+        setRedFilterOptions(redInkOptionsFromSample(sample));
+        setPicking(false);
+    };
+
+    const printHideImage = (q: PaperQuestion, mode: "smart" | "hide" | "show" = imageMode): boolean => {
+        if (mode === "hide") return true;
+        if (mode === "show") return false;
         return q.requiresImage === false; // smart：仅明确判定"无需看图"才隐藏，null 保守显示
     };
 
-    const print = (withAnswers: boolean, mode: "smart" | "hide" | "show") => {
+    const print = async (withAnswers: boolean, mode: "smart" | "hide" | "show") => {
+        const applyRed = !withAnswers;
+        // 等待即将显示的原图完成去红处理（命中缓存则立即返回），避免打印到未处理的原图
+        const pending = (paper?.questions ?? [])
+            .filter(
+                (q) =>
+                    applyRed &&
+                    q.originalImageUrl &&
+                    !q.isVariant &&
+                    !redExempt[q.id] &&
+                    !printHideImage(q, mode)
+            )
+            .map((q) => getRedFilteredImage(q.originalImageUrl as string, redFilterOptions ?? undefined));
+        await Promise.all(pending);
         const el = document.getElementById("answer-section");
         if (el) el.style.display = withAnswers ? "block" : "none";
         // 图片显隐靠 className 生效，flushSync 确保 DOM 同步更新后再唤起打印
-        flushSync(() => setImageMode(mode));
+        flushSync(() => {
+            setImageMode(mode);
+            setRedFilter(applyRed);
+        });
         window.print();
     };
 
@@ -180,6 +234,21 @@ export default function PaperDetailPage() {
                         <Button variant="outline" onClick={startGrading}>
                             <ClipboardCheck className="mr-2 h-4 w-4" />{t.paper?.recordGrades || "录成绩"}
                         </Button>
+                        {hasPrintImages && (
+                            <Button variant="outline" onClick={() => setPicking((p) => !p)}>
+                                <Pipette className="mr-2 h-4 w-4" />
+                                {picking
+                                    ? t.paper?.pickColorActive || "点击红笔取色…（Esc 取消）"
+                                    : redFilterOptions
+                                        ? t.paper?.pickColorDone || "取色校准（已校准）"
+                                        : t.paper?.pickColor || "取色校准"}
+                            </Button>
+                        )}
+                        {redFilterOptions && !picking && (
+                            <Button variant="ghost" size="sm" onClick={() => setRedFilterOptions(null)}>
+                                {t.paper?.resetCalibration || "恢复默认"}
+                            </Button>
+                        )}
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <Button variant="outline">
@@ -211,6 +280,13 @@ export default function PaperDetailPage() {
                 )}
             </div>
 
+            {/* 取色校准提示条：取色模式下全卷临时显示原图，点击红笔痕迹完成校准 */}
+            {picking && (
+                <div className="print:hidden mb-4 rounded border border-dashed border-primary/50 bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
+                    {t.paper?.pickColorHint || "请点击任意原图中的红笔痕迹（当前显示未过滤原图），全部图片将按该颜色重新过滤；按 Esc 取消"}
+                </div>
+            )}
+
             {/* 试卷头部（打印时显示，屏幕上隐藏——定案：不要姓名/日期/总分栏，仅标题） */}
             <div className="hidden print:block text-center mb-6">
                 <h1 className="text-xl font-bold">{paper.title}</h1>
@@ -239,11 +315,13 @@ export default function PaperDetailPage() {
                                         </div>
                                         {q.originalImageUrl && !q.isVariant && (
                                             <div className={`relative mt-2 inline-block ${printHideImage(q) ? "print:hidden" : ""}`}>
-                                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                <img
+                                                <RedFilteredImage
                                                     src={q.originalImageUrl}
+                                                    enabled={redFilter && !redExempt[q.id] && !picking}
+                                                    options={redFilterOptions ?? undefined}
                                                     alt="原题"
-                                                    className="block max-w-[45%] rounded border print:max-w-[55%]"
+                                                    className={`block max-w-[45%] rounded border print:max-w-[55%] ${picking ? "cursor-crosshair" : ""}`}
+                                                    onClick={picking ? (e) => handlePick(e, q.originalImageUrl as string) : undefined}
                                                 />
                                                 {/* 打印遮罩：白色覆盖原图上的手写痕迹（print-color-adjust 确保打印背景色生效） */}
                                                 {q.imageMasks?.map((m, i) => (
@@ -262,16 +340,30 @@ export default function PaperDetailPage() {
                                                 ))}
                                             </div>
                                         )}
-                                        {q.originalImageUrl && !q.isVariant && q.sourceErrorItemId && (
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                className="print:hidden mt-1 h-7 gap-1 px-2 text-xs text-muted-foreground"
-                                                onClick={() => setMaskEditing(q)}
-                                            >
-                                                <Eraser className="h-3.5 w-3.5" />
-                                                遮盖作答痕迹{q.imageMasks?.length ? `（${q.imageMasks.length}）` : ""}
-                                            </Button>
+                                        {q.originalImageUrl && !q.isVariant && (
+                                            <div className="print:hidden mt-1 flex flex-wrap gap-1">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className={`h-7 gap-1 px-2 text-xs ${redExempt[q.id] ? "text-destructive" : "text-muted-foreground"}`}
+                                                    onClick={() => setRedExempt((p) => ({ ...p, [q.id]: !p[q.id] }))}
+                                                    title={t.paper?.redFilterHint || "打印时自动滤除红笔痕迹；若题目本身的红色内容被误除，点此关闭"}
+                                                >
+                                                    <Droplet className="h-3.5 w-3.5" />
+                                                    {redExempt[q.id] ? t.paper?.redFilterOff || "红笔过滤：关" : t.paper?.redFilterOn || "红笔过滤：开"}
+                                                </Button>
+                                                {q.sourceErrorItemId && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                                                        onClick={() => setMaskEditing(q)}
+                                                    >
+                                                        <Eraser className="h-3.5 w-3.5" />
+                                                        遮盖作答痕迹{q.imageMasks?.length ? `（${q.imageMasks.length}）` : ""}
+                                                    </Button>
+                                                )}
+                                            </div>
                                         )}
                                         {grading && (
                                             <div className="mt-2 flex items-center gap-2">
