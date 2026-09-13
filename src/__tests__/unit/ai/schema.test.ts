@@ -4,7 +4,7 @@
  * 测试 Zod 验证 schema，特别是新增的错因分析字段
  */
 import { describe, it, expect } from 'vitest';
-import { ParsedQuestionSchema, safeParseParsedQuestion, normalizeLatexEscapes } from '@/lib/ai/schema';
+import { ParsedQuestionSchema, safeParseParsedQuestion, normalizeLatexEscapes, parseGradeResponse } from '@/lib/ai/schema';
 
 describe('ParsedQuestionSchema 验证', () => {
     const validBaseQuestion = {
@@ -170,5 +170,43 @@ describe('normalizeLatexEscapes', () => {
         const plain = '解：先通分再相加，注意运算顺序。';
         expect(normalizeLatexEscapes(plain)).toBe(plain);
         expect(normalizeLatexEscapes('')).toBe('');
+    });
+
+    it('应还原被 JSON 解析吞成 form feed 的 \\f（\\x0Crac → \\frac）', () => {
+        // \f 是 JSON 合法转义（form feed \x0C）：AI 半转义输出 "\frac" 时被 JSON.parse 静默吞掉，剩 FF+rac
+        const corrupted = '计算 $' + '\f' + 'rac{1}{2} + \\cdots$ 的值';
+        const restored = '计算 $\\frac{1}{2} + \\cdots$ 的值';
+        expect(normalizeLatexEscapes(corrupted)).toBe(restored);
+    });
+
+    it('双反斜杠归一与 form feed 还原应可叠加处理', () => {
+        // 混合：\\times 双转义 + FF 吞字（被吞的 \f 反斜杠与 f 一同消失，FF 前无多余反斜杠）
+        const mixed = "$\\\\times" + "\f" + "rac{2}{3}$";
+        const expected = "$\\times\\frac{2}{3}$";
+        expect(normalizeLatexEscapes(mixed)).toBe(expected);
+    });
+});
+
+describe('parseGradeResponse (扫图批改响应)', () => {
+    // 模拟 provider 的 extractTag：提取 <tag>...</tag>
+    const extractTag = (text: string, tagName: string) => {
+        const m = text.match(new RegExp(`<${tagName}>([\\s\\S]*?)</${tagName}>`));
+        return m ? m[1] : null;
+    };
+
+    it('应解析对/错判定与点评', () => {
+        const result = parseGradeResponse('<is_correct>\ntrue\n</is_correct>\n<comment>作答正确，步骤完整。</comment>', extractTag);
+        expect(result.isCorrect).toBe(true);
+        expect(result.comment).toBe('作答正确，步骤完整。');
+    });
+
+    it('缺 is_correct 或胡乱填写应保守判错', () => {
+        expect(parseGradeResponse('<comment>xxx</comment>', extractTag).isCorrect).toBe(false);
+        expect(parseGradeResponse('<is_correct>maybe</is_correct>', extractTag).isCorrect).toBe(false);
+    });
+
+    it('点评应过 LaTeX 转义归一（FF 还原）', () => {
+        const result = parseGradeResponse('<is_correct>false</is_correct><comment>化简 ' + '\f' + 'rac{1}{2} 时出错</comment>', extractTag);
+        expect(result.comment).toBe('化简 \\frac{1}{2} 时出错');
     });
 });

@@ -1,8 +1,8 @@
 import { AzureOpenAI } from "openai";
-import { AIService, ParsedQuestion, DifficultyLevel, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
-import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateReanswerPrompt, generateGeogebraPrompt, generateBackfillPrompt } from './prompts';
+import { AIService, ParsedQuestion, DifficultyLevel, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult, GradeAnswerResult, GradeAnswerInput } from "./types";
+import { generateAnalyzePrompt, generateSimilarQuestionPrompt, generateReanswerPrompt, generateGeogebraPrompt, generateBackfillPrompt, generateGradePrompt } from './prompts';
 import { getAppConfig, getThinkingLevel, type ThinkingTask } from '../config';
-import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes } from './schema';
+import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes, parseGradeResponse } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
 import { normalizeMistakeStatusForSave } from '../mistake-status';
@@ -315,6 +315,43 @@ Knowledge Points: ${knowledgePoints.join(", ")}
             this.handleError(error);
             throw error;
         }
+    }
+
+    /** 扫图批改（复习卷闭环）：对照题目与参考答案批改作答（图片或手动输入文字；azure 用整串提示词） */
+    async gradeAnswer(questionText: string, answerText: string, input: GradeAnswerInput, language: 'zh' | 'en' = 'zh', gradeSemester?: string | null): Promise<GradeAnswerResult> {
+        const config = getAppConfig();
+        const prompt = generateGradePrompt(language, questionText, answerText, { customTemplate: config.prompts?.grade }, gradeSemester, input.studentAnswer);
+
+        logger.box('📷 Grade Answer Request', { provider: 'Azure OpenAI', deployment: this.deployment, hasImage: !!input.imageBase64, hasStudentAnswer: !!input.studentAnswer });
+
+        // 学生作答文字已并入整串 prompt 的变量区；有图片时附在 user 消息
+        let userContent: AzureUserContent = "请批改这道题的作答。";
+        if (input.imageBase64) {
+            userContent = [
+                { type: "text", text: "请批改图片中这道题的作答。" },
+                { type: "image_url", image_url: { url: this.toDataUrl(input.imageBase64) } },
+            ];
+        }
+
+        const response = await this.client.chat.completions.create({
+            model: this.deployment,
+            ...this.genEffortOptions('grade'),
+            messages: [
+                { role: "system", content: prompt },
+                { role: "user", content: userContent },
+            ],
+            max_tokens: MAX_OUTPUT_TOKENS,
+        });
+
+        const text = response.choices?.[0]?.message?.content || "";
+        if (!text) throw new Error("Empty response from AI");
+        logger.debug({ rawResponse: text }, 'AI raw response');
+        return parseGradeResponse(text, (t, tag) => this.extractTag(t, tag));
+    }
+
+    /** 兼容裸 base64 与 data URL 两种输入 */
+    private toDataUrl(base64: string): string {
+        return base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`;
     }
 
     async reanswerQuestion(

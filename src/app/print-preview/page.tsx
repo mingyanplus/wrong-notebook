@@ -9,10 +9,7 @@ import { apiClient } from "@/lib/api-client";
 import { ErrorItem, PaginatedResponse } from "@/types/api";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { PRINT_PREVIEW_PAGE_SIZE } from "@/lib/constants/pagination";
-import { RedFilteredImage, getRedFilteredImage, sampleRedInkFromImage } from "@/components/red-filtered-image";
-import { redInkOptionsFromSample } from "@/lib/image-color-filter";
-import type { RedInkFilterOptions } from "@/lib/image-color-filter";
-import { Pipette } from "lucide-react";
+import { RedFilteredImage, getRedFilteredImage, useInkCalibration, InkCalibrationControls } from "@/components/red-filtered-image";
 import {
     getPrintPreviewCountLabel,
     getPrintPreviewEmptyState,
@@ -32,24 +29,14 @@ function PrintPreviewContent() {
     const [showQuestionText, setShowQuestionText] = useState(false);
     // 红笔过滤：打印前自动滤除图片中的红笔订正痕迹，防止孩子重做时看到答案
     const [redFilter, setRedFilter] = useState(true);
-    // 取色校准：null=内置默认参数；取样后以该颜色为中心生成检测范围（拍摄色偏时用）
-    const [redFilterOptions, setRedFilterOptions] = useState<RedInkFilterOptions | null>(null);
-    const [picking, setPicking] = useState(false);
+    // 取色校准（共享 hook + 共享工具条组件），失败文案统一走 t.inkCalibration
+    const calibration = useInkCalibration(t.inkCalibration?.fail || 'No obvious ink color detected at that spot. Click the center of a red mark and retry.');
+    const { picking, redFilterOptions, pickFrom } = calibration;
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         fetchItems();
     }, []);
-
-    // 取色模式按 Esc 退出
-    useEffect(() => {
-        if (!picking) return;
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape") setPicking(false);
-        };
-        window.addEventListener("keydown", onKey);
-        return () => window.removeEventListener("keydown", onKey);
-    }, [picking]);
     const fetchItems = async () => {
         try {
             const params = new URLSearchParams(searchParams.toString());
@@ -70,26 +57,10 @@ function PrintPreviewContent() {
         if (redFilter) {
             const pending = selectedItems
                 .filter((item) => item.originalImageUrl && !(showQuestionText && item.questionText))
-                .map((item) => getRedFilteredImage(item.originalImageUrl as string, redFilterOptions ?? undefined));
+                .map((item) => getRedFilteredImage(item.originalImageUrl as string, redFilterOptions));
             await Promise.all(pending);
         }
         window.print();
-    };
-
-    // 取色校准：点击原图上的红笔痕迹，以该颜色为中心重新生成全部图片的检测范围
-    const handlePick = async (e: React.MouseEvent<HTMLImageElement>, src: string) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const sample = await sampleRedInkFromImage(
-            src,
-            (e.clientX - rect.left) / rect.width,
-            (e.clientY - rect.top) / rect.height
-        );
-        if (!sample) {
-            alert(t.printPreview?.pickColorFail || 'No obvious ink color detected at that spot. Click the center of a red mark and retry.');
-            return;
-        }
-        setRedFilterOptions(redInkOptionsFromSample(sample));
-        setPicking(false);
     };
 
     const selectedItems = getSelectedPrintItems(items, selectedIds);
@@ -158,15 +129,16 @@ function PrintPreviewContent() {
 
                         {/* Toggle Options - Grid on Mobile */}
                         <div className="flex flex-wrap gap-x-3 gap-y-1 sm:gap-4">
-                            <label className="flex items-center gap-1.5 text-xs sm:text-sm cursor-pointer whitespace-nowrap hover:text-primary transition-colors" title={t.printPreview?.redFilterHint || 'Automatically remove red ink marks when printing. Disable if red content in the question itself is removed.'}>
+                            <label className="flex items-center gap-1.5 text-xs sm:text-sm cursor-pointer whitespace-nowrap hover:text-primary transition-colors" title={t.inkCalibration?.filterHint || 'Automatically remove red ink marks when printing. Disable if red content in the question itself is removed.'}>
                                 <input
                                     type="checkbox"
                                     checked={redFilter}
                                     onChange={(e) => setRedFilter(e.target.checked)}
                                     className="rounded border-gray-300 text-primary focus:ring-primary w-3.5 h-3.5 sm:w-4 sm:h-4"
                                 />
-                                {t.printPreview?.redFilter || 'Red Ink Filter'}
+                                {t.inkCalibration?.filter || 'Red Ink Filter'}
                             </label>
+                            <InkCalibrationControls calibration={calibration} />
                             <label className="flex items-center gap-1.5 text-xs sm:text-sm cursor-pointer whitespace-nowrap hover:text-primary transition-colors">
                                 <input
                                     type="checkbox"
@@ -203,28 +175,6 @@ function PrintPreviewContent() {
                                 />
                                 {t.printPreview?.showTags || 'Show Tags'}
                             </label>
-                        </div>
-                        {/* 取色校准（红笔颜色因拍摄色偏而滤不净时，点击图上笔迹重新校准） */}
-                        <div className="flex items-center gap-1.5">
-                            <Button
-                                variant={picking ? "default" : "outline"}
-                                size="sm"
-                                className="h-7 gap-1 px-2 text-xs"
-                                onClick={() => setPicking((p) => !p)}
-                                title={t.printPreview?.pickColorHint || 'Click a red ink mark on any image to re-calibrate the filter (images are shown unfiltered while picking). Esc to cancel.'}
-                            >
-                                <Pipette className="h-3.5 w-3.5" />
-                                {picking
-                                    ? t.printPreview?.pickColorActive || 'Click red ink… (Esc)'
-                                    : redFilterOptions
-                                        ? t.printPreview?.pickColorDone || 'Ink Calibrated'
-                                        : t.printPreview?.pickColor || 'Ink Calibrate'}
-                            </Button>
-                            {redFilterOptions && !picking && (
-                                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setRedFilterOptions(null)}>
-                                    {t.printPreview?.resetCalibration || 'Reset'}
-                                </Button>
-                            )}
                         </div>
                     </div>
 
@@ -336,11 +286,11 @@ function PrintPreviewContent() {
                                         <RedFilteredImage
                                             src={item.originalImageUrl}
                                             enabled={redFilter && !picking}
-                                            options={redFilterOptions ?? undefined}
+                                            options={redFilterOptions}
                                             alt={t.detail?.originalProblem || 'Question Image'}
                                             className={`h-auto border rounded ${picking ? "cursor-crosshair" : ""}`}
                                             style={{ maxWidth: `${imageScale}%` }}
-                                            onClick={picking ? (e) => handlePick(e, item.originalImageUrl as string) : undefined}
+                                            onClick={picking ? (e) => pickFrom(e, item.originalImageUrl as string) : undefined}
                                         />
                                     </div>
                                 )

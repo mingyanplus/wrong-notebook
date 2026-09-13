@@ -1,9 +1,9 @@
 /**
  * 红笔痕迹过滤单元测试
- * 覆盖：单像素红色强度判定（红笔深浅、误杀场景排除）、整图像素处理、取色校准
+ * 覆盖：单像素红色强度判定（红笔深浅、误杀场景排除）、整图像素处理、取色校准与范围档位
  */
 import { describe, it, expect } from 'vitest';
-import { redInkStrength, filterRedInk, sampleRedInk, redInkOptionsFromSample } from '@/lib/image-color-filter';
+import { redInkStrength, filterRedInk, sampleRedInk, inkOptionsFromSample, defaultInkOptions } from '@/lib/image-color-filter';
 import type { PixelBuffer, SampledColor } from '@/lib/image-color-filter';
 
 /** 构造单行 RGBA 像素缓冲 */
@@ -56,11 +56,11 @@ describe('redInkStrength (单像素红色判定)', () => {
     });
 
     it('暗红色应保守保留（与黑字无法区分）', () => {
-        expect(redInkStrength(50, 20, 20)).toBe(0);         // 亮度低于下限
+        expect(redInkStrength(48, 20, 20)).toBe(0);         // 亮度低于下限
     });
 
     it('边缘淡红像素应产生中间强度（平滑过渡）', () => {
-        const s = redInkStrength(230, 150, 150);            // 红与白混合的抗锯齿像素
+        const s = redInkStrength(240, 175, 175);          // 红与白混合的抗锯齿像素
         expect(s).toBeGreaterThan(0);
         expect(s).toBeLessThan(0.5);
     });
@@ -118,22 +118,58 @@ describe('sampleRedInk (取色采样)', () => {
     });
 });
 
-describe('redInkOptionsFromSample (样本生成检测参数)', () => {
+describe('inkOptionsFromSample / defaultInkOptions (范围档位)', () => {
     const sample: SampledColor = { r: 200, g: 90, b: 90, h: 8, s: 0.75, v: 0.7 };
 
-    it('应该以样本色相为中心并放宽饱和度/亮度下限', () => {
-        const opts = redInkOptionsFromSample(sample);
+    it('中档(50)应围绕样本色相并适度放宽', () => {
+        const opts = inkOptionsFromSample(sample, 50);
         expect(opts.hueCenter).toBe(8);
-        expect(opts.maxHueDistance).toBe(15);
-        expect(opts.minSaturation).toBe(0.55); // 0.75 - 0.2
-        expect(opts.minBrightness).toBe(0.5);  // 0.7 - 0.2
+        expect(opts.maxHueDistance).toBe(24);   // lerp(10, 38, 0.5)
+        expect(opts.minSaturation).toBe(0.43);  // 0.75 - 0.325
+        expect(opts.minBrightness).toBe(0.38);  // 0.7 - 0.325
     });
 
-    it('放宽后的下限不应低于 0.15（防误杀纸面）', () => {
-        const pale: SampledColor = { ...sample, s: 0.3, v: 0.28 };
-        const opts = redInkOptionsFromSample(pale);
-        expect(opts.minSaturation).toBe(0.15);
-        expect(opts.minBrightness).toBe(0.15);
+    it('低档应更严、高档应更宽', () => {
+        const low = inkOptionsFromSample(sample, 0);
+        const high = inkOptionsFromSample(sample, 100);
+        expect(low.maxHueDistance).toBe(10);
+        expect(high.maxHueDistance).toBe(38);
+        expect(high.minSaturation).toBeLessThan(low.minSaturation);
+        expect(high.minBrightness).toBeLessThan(low.minBrightness);
+    });
+
+    it('放宽后的下限不应低于 floor=0.1（防误杀纸面）', () => {
+        const pale = inkOptionsFromSample({ ...sample, s: 0.3, v: 0.28 }, 100);
+        expect(pale.minSaturation).toBe(0.1);
+        expect(pale.minBrightness).toBe(0.1);
+    });
+
+    it('无取样时的默认检测随档位变化', () => {
+        const mid = defaultInkOptions(50);
+        expect(mid.hueCenter).toBe(0);
+        expect(mid.maxHueDistance).toBe(24);
+        expect(mid.minSaturation).toBe(0.25);
+        expect(mid.minBrightness).toBe(0.19);
+        expect(defaultInkOptions(100).minSaturation).toBeLessThan(defaultInkOptions(0).minSaturation);
+    });
+});
+
+describe('filterRedInk (多中心过滤)', () => {
+    it('红笔与蓝笔双取样中心应同时过滤，黑字保留', () => {
+        const centers = [
+            inkOptionsFromSample({ r: 180, g: 40, b: 40, h: 0, s: 0.78, v: 0.71 }, 50),
+            inkOptionsFromSample({ r: 40, g: 90, b: 180, h: 219, s: 0.78, v: 0.71 }, 50),
+        ];
+        const buffer = makeBuffer([
+            [180, 40, 40],   // 红笔 → 命中红中心
+            [40, 90, 180],   // 蓝笔 → 命中蓝中心
+            [10, 10, 10],    // 黑字 → 保留
+        ]);
+        filterRedInk(buffer, centers);
+        const d = buffer.data;
+        expect(d[0]).toBeGreaterThanOrEqual(250);
+        expect(d[4]).toBeGreaterThanOrEqual(250);
+        expect([d[8], d[9], d[10]]).toEqual([10, 10, 10]);
     });
 });
 

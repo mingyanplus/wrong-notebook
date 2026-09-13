@@ -10,6 +10,7 @@ import { findParentTagIdForGrade } from "@/lib/tag-recognition";
 import { inferSubjectFromName } from "@/lib/knowledge-tags";
 import { normalizeMistakeStatusForSave } from "@/lib/mistake-status";
 import { calculateNextReviewDate } from "@/lib/scheduler";
+import { scheduleVariantGeneration } from "@/lib/variant-generator";
 
 const logger = createLogger('api:error-items');
 
@@ -206,6 +207,9 @@ export async function POST(req: Request) {
                     reviewCount: 0,
                 },
             });
+
+            // 变式题后台自动生成（用户开启配置时；异步排队不阻塞保存）
+            scheduleVariantGeneration(errorItem.id, user.id);
 
             return NextResponse.json(errorItem, { status: 201 });
         } catch (dbError) {

@@ -37,6 +37,7 @@ export interface AppConfig {
     prompts?: {
         analyze?: string;
         similar?: string;
+        grade?: string;
     };
     timeouts?: {
         analyze?: number; // 毫秒
@@ -53,10 +54,11 @@ export interface AppConfig {
         reanswer?: ThinkingLevel;  // 重新解题
         geogebra?: ThinkingLevel;  // GeoGebra 演示命令生成
         backfill?: ThinkingLevel;  // 批量补全标签/题型/错因
+        grade?: ThinkingLevel;     // 扫图/手动答案批改点评
     };
 }
 
-export type ThinkingTask = 'analyze' | 'similar' | 'reanswer' | 'geogebra' | 'backfill';
+export type ThinkingTask = 'analyze' | 'similar' | 'reanswer' | 'geogebra' | 'backfill' | 'grade';
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];

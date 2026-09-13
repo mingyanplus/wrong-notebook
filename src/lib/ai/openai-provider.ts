@@ -1,8 +1,8 @@
 import OpenAI from "openai";
-import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
+import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult, GradeAnswerResult, GradeAnswerInput } from "./types";
 import { generateAnalyzePromptParts, generateSimilarQuestionPromptParts, generateGeogebraPromptParts, generateBackfillPromptParts } from './prompts';
 import { getAppConfig, getThinkingLevel, type ThinkingTask } from '../config';
-import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes } from './schema';
+import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes, parseGradeResponse } from './schema';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
 import { normalizeMistakeStatusForSave } from '../mistake-status';
@@ -384,6 +384,44 @@ export class OpenAIProvider implements AIService {
             this.handleError(error);
             throw error;
         }
+    }
+
+    /** 扫图批改（复习卷闭环）：对照题目与参考答案批改作答（图片或手动输入文字），缓存分层 + 多模态 */
+    async gradeAnswer(questionText: string, answerText: string, input: GradeAnswerInput, language: 'zh' | 'en' = 'zh', gradeSemester?: string | null): Promise<GradeAnswerResult> {
+        const { generateGradePromptParts } = await import('./prompts');
+        const config = getAppConfig();
+        const { systemPrompt, userContext } = generateGradePromptParts(language, questionText, answerText, { customTemplate: config.prompts?.grade }, gradeSemester, input.studentAnswer);
+
+        logger.info({ provider: 'OpenAI', hasImage: !!input.imageBase64, hasStudentAnswer: !!input.studentAnswer }, 'Grade Answer Request');
+
+        // 变量区文本在前，作答图片在后；仅有文字作答时为纯文本请求
+        let userContent: OpenAIUserContent = userContext;
+        if (input.imageBase64) {
+            userContent = [
+                { type: "text", text: userContext },
+                { type: "image_url", image_url: { url: this.toDataUrl(input.imageBase64) } },
+            ];
+        }
+
+        const response = await this.openai.chat.completions.create({
+            model: this.model,
+            ...this.genEffortOptions('grade'),
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userContent },
+            ],
+            max_tokens: MAX_OUTPUT_TOKENS,
+        });
+
+        const text = response.choices?.[0]?.message?.content || "";
+        if (!text) throw new Error("Empty response from AI");
+        logger.debug({ rawResponse: text }, 'AI raw response');
+        return parseGradeResponse(text, (t, tag) => this.extractTag(t, tag));
+    }
+
+    /** 兼容裸 base64 与 data URL 两种输入 */
+    private toDataUrl(base64: string): string {
+        return base64.startsWith('data:') ? base64 : `data:image/jpeg;base64,${base64}`;
     }
 
     async reanswerQuestion(questionText: string, language: 'zh' | 'en' = 'zh', subject?: string | null, imageBase64?: string, gradeSemester?: string | null): Promise<ReanswerQuestionResult> {

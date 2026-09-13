@@ -22,6 +22,9 @@ model User {
   educationStage String? // primary, junior_high, senior_high, university
   enrollmentYear Int?
 
+  reviewSettings String? // 复习设置 JSON：{dailyLimit, errorCategories}，见 src/lib/review-settings.ts
+  variantSettings String? // 变式自动生成配置 JSON：{enabled, perDifficulty}，见 src/lib/variant-settings.ts
+
   role      String   @default("user") // "admin" or "user"
   isActive  Boolean  @default(true)   // 用户是否启用
 
@@ -123,6 +126,23 @@ model ErrorItem {
   updatedAt        DateTime @updatedAt
 
   reviewSchedules ReviewSchedule[]
+  variants        VariantQuestion[]
+}
+
+// 举一反三变式题库：错题入库后按用户配置后台自动生成，打印复习卷时按难度/数量勾选直接取用
+model VariantQuestion {
+  id          String    @id @default(cuid())
+  errorItemId String
+  errorItem   ErrorItem @relation(fields: [errorItemId], references: [id], onDelete: Cascade)
+
+  difficulty  String    // easy / medium / hard / harder（适中/困难/挑战映射见 variant-settings.ts）
+  questionText String
+  answerText  String
+  analysis    String
+
+  createdAt   DateTime  @default(now())
+
+  @@index([errorItemId, difficulty])
 }
 
 model ReviewSchedule {

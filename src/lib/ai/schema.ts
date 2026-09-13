@@ -55,11 +55,33 @@ export function safeParseParsedQuestion(data: unknown) {
 }
 
 /**
- * 还原 AI 偶发输出的 JSON 风格反斜杠转义（如 \\frac → \frac）。
- * 仅匹配「\\ + 命令字母」的组合；LaTeX 合法的换行命令 \\ 后面不会直接跟字母，不受影响。
+ * 还原 AI 输出的 LaTeX 转义问题：
+ * 1. 偶发输出的 JSON 风格双反斜杠转义（\\frac → \frac）。仅匹配「\\ + 命令字母」的组合；
+ *    LaTeX 合法的换行命令 \\ 后面不会直接跟字母，不受影响。
+ * 2. 被某层 JSON 解析吞掉的 \f 转义：\f 是 JSON 合法转义（form feed 控制字符 \x0C），
+ *    AI 半转义输出 "\frac" 时 JSON.parse 不报错而静默吞掉反斜杠和 f（剩 "\x0Crac" 显示为 rac）。
+ *    题目正文不会出现字面 form feed，还原为字面 \f 零误伤（\x0Crac → \frac）。
  */
 export function normalizeLatexEscapes(text: string): string {
-    return text.replace(/\\\\(?=[a-zA-Z])/g, '\\');
+    return text
+        .replace(/\\\\(?=[a-zA-Z])/g, '\\')
+        .replace(/\f/g, '\\f');
+}
+
+/**
+ * 解析扫图批改的 XML 标签响应（三个 Provider 共享；provider 仅传入各自的 extractTag）。
+ * is_correct 仅在明确输出 "true" 时判对（缺标签/胡乱填写一律判错，保守不推进掌握度）。
+ */
+export function parseGradeResponse(
+    text: string,
+    extractTag: (text: string, tagName: string) => string | null
+): { isCorrect: boolean; comment: string } {
+    const isCorrectRaw = extractTag(text, "is_correct")?.trim().toLowerCase();
+    const comment = extractTag(text, "comment")?.trim() ?? "";
+    return {
+        isCorrect: isCorrectRaw === "true",
+        comment: normalizeLatexEscapes(comment),
+    };
 }
 
 /**

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
-import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult } from "./types";
+import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult, GradeAnswerResult, GradeAnswerInput } from "./types";
 import { generateAnalyzePromptParts, generateSimilarQuestionPromptParts, generateGeogebraPromptParts, generateBackfillPromptParts } from './prompts';
-import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes } from './schema';
+import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes, parseGradeResponse } from './schema';
 import { getAppConfig, getThinkingLevel, type ThinkingTask, type ThinkingLevel } from '../config';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
@@ -312,6 +312,36 @@ export class GeminiProvider implements AIService {
             this.handleError(error);
             throw error;
         }
+    }
+
+    /** 扫图批改（复习卷闭环）：对照题目与参考答案批改作答（图片或手动输入文字），缓存分层 + 多模态 */
+    async gradeAnswer(questionText: string, answerText: string, input: GradeAnswerInput, language: 'zh' | 'en' = 'zh', gradeSemester?: string | null): Promise<GradeAnswerResult> {
+        const { generateGradePromptParts } = await import('./prompts');
+        const config = getAppConfig();
+        const { systemPrompt, userContext } = generateGradePromptParts(language, questionText, answerText, { customTemplate: config.prompts?.grade }, gradeSemester, input.studentAnswer);
+
+        logger.info({ provider: 'Gemini', hasImage: !!input.imageBase64, hasStudentAnswer: !!input.studentAnswer }, 'Grade Answer Request');
+
+        // 变量区文本在前，作答图片在后；仅有文字作答时为纯文本请求
+        const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [{ text: userContext }];
+        if (input.imageBase64) {
+            parts.push({
+                inlineData: { mimeType: 'image/jpeg', data: input.imageBase64.replace(/^data:image\/\w+;base64,/, '') },
+            });
+        }
+
+        const options = this.genContentOptions('grade');
+        const response = await this.retryOperation(() => this.ai.models.generateContent({
+            model: this.modelName,
+            ...options,
+            config: { ...options.config, systemInstruction: systemPrompt || undefined },
+            contents: [{ role: 'user', parts }],
+        }));
+
+        const text = response.text || '';
+        if (!text) throw new Error("Empty response from AI");
+        logger.debug({ rawResponse: text }, 'AI raw response');
+        return parseGradeResponse(text, (t, tag) => this.extractTag(t, tag));
     }
 
     async reanswerQuestion(questionText: string, language: 'zh' | 'en' = 'zh', subject?: string | null, imageBase64?: string, gradeSemester?: string | null): Promise<ReanswerQuestionResult> {

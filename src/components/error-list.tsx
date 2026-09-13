@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Filter, CheckCircle, Clock, ChevronDown, Printer, ListChecks, Trash2, X, Bell, WandSparkles, FileText } from "lucide-react";
+import { Search, Filter, CheckCircle, Clock, ChevronDown, Printer, ListChecks, Trash2, X, Bell, WandSparkles, FileText, Camera, PenLine } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
+import { processImageFile } from "@/lib/image-utils";
+import { groupByFirstTag } from "@/lib/knowledge-tags";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter } from "next/navigation";
 import {
@@ -55,8 +57,8 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const [availableSources, setAvailableSources] = useState<string[]>([]);
     const [selectedTag, setSelectedTag] = useState<string | null>(null);
     const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
-    // 到期待复习（艾宾浩斯计划）
-    const [dueReviews, setDueReviews] = useState<Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null } }>>([]);
+    // 到期待复习（艾宾浩斯计划）；knowledgeTags 供按知识点分组现做（用户流程：按知识点×错因过重点题）
+    const [dueReviews, setDueReviews] = useState<Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null; knowledgeTags?: string[] } }>>([]);
     const [showDueList, setShowDueList] = useState(false);
     // 分页状态
     const [page, setPage] = useState(1);
@@ -74,7 +76,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     useEffect(() => {
         let cancelled = false;
         const query = subjectId ? `?subjectId=${subjectId}` : "";
-        apiClient.get<{ count: number; items: Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null } }> }>(`/api/review/due${query}`)
+        apiClient.get<{ count: number; items: Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null; knowledgeTags?: string[] } }> }>(`/api/review/due${query}`)
             .then((data) => {
                 if (!cancelled) setDueReviews(data.items || []);
             })
@@ -260,43 +262,204 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         }
     };
 
+    // 到期题按知识点分组（取首个标签，无标签归「未分类」）——支撑「按知识点逐块现做」的复习流程
+    const dueGroups = useMemo(
+        () =>
+            Array.from(
+                groupByFirstTag(dueReviews, (d) => d.errorItem.knowledgeTags, t.filter.dueUngrouped || "未分类").entries()
+            ),
+        [dueReviews, t.filter.dueUngrouped]
+    );
+
+    // 单题忙碌集合（录入中/批改中统一互斥）
+    const [busy, setBusy] = useState<Set<string>>(new Set());
+    const markBusy = (id: string) => setBusy((s) => new Set(s).add(id));
+    const clearBusy = (id: string) =>
+        setBusy((s) => {
+            const next = new Set(s);
+            next.delete(id);
+            return next;
+        });
+    // 拍照批改的共享文件选择器
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const gradingTargetRef = useRef<string | null>(null);
+
+    // 纸质复习卷结果录入：逐题对/错 → 完成复习计划 + 掌握度流转 + 艾宾浩斯下一条（录入后从到期列表移除）
+    const recordReview = async (errorItemId: string, isCorrect: boolean) => {
+        markBusy(errorItemId);
+        try {
+            await apiClient.post("/api/review/complete", { results: [{ errorItemId, isCorrect }] });
+            setDueReviews((list) => list.filter((d) => d.errorItem.id !== errorItemId));
+        } catch {
+            alert(t.filter?.recordFail || "录入失败，请重试");
+        } finally {
+            clearBusy(errorItemId);
+        }
+    };
+
+    // 批改公共流程（拍照/手动共用）：调 AI 批改 → 展示点评 → 家长确认后录入
+    const runGrade = async (errorItemId: string, payload: { imageBase64?: string; studentAnswer?: string }) => {
+        markBusy(errorItemId);
+        try {
+            const result = await apiClient.post<
+                { isCorrect: boolean; comment: string },
+                { errorItemId: string; imageBase64?: string; studentAnswer?: string }
+            >("/api/review/grade", { errorItemId, ...payload });
+            const verdict = result.isCorrect
+                ? t.filter?.gradeCorrect || "✓ 做对"
+                : t.filter?.gradeWrong || "✗ 做错";
+            const ok = window.confirm(
+                `${verdict}\n\n${result.comment}\n\n${t.filter?.gradeConfirm || "按此结果录入吗？（取消 = 不录入）"}`
+            );
+            if (ok) await recordReview(errorItemId, result.isCorrect);
+        } catch {
+            alert(t.filter?.gradeFail || "批改失败，请重试");
+        } finally {
+            clearBusy(errorItemId);
+        }
+    };
+
+    // 拍照批改：读图压缩（复用全站上传链路的压缩）→ AI 批改
+    const handleGradeFile = (file: File) => {
+        const errorItemId = gradingTargetRef.current;
+        if (!errorItemId) return;
+        processImageFile(file)
+            .then((imageBase64) => runGrade(errorItemId, { imageBase64 }))
+            .catch(() => alert(t.filter?.gradeFail || "批改失败，请重试"));
+    };
+
+    // 手动输入作答批改（拍照识别不佳时的兜底）：输入孩子作答文字 → AI 对照参考答案批改
+    const startManualGrading = (errorItemId: string) => {
+        const studentAnswer = window.prompt(
+            t.filter?.manualGradePrompt || "请输入孩子的作答（最终答案或简要过程），AI 将对照参考答案批改点评："
+        );
+        if (studentAnswer === null || !studentAnswer.trim()) return;
+        void runGrade(errorItemId, { studentAnswer: studentAnswer.trim() });
+    };
+
+    const startPhotoGrading = (errorItemId: string) => {
+        gradingTargetRef.current = errorItemId;
+        fileInputRef.current?.click();
+    };
+
     return (
         <div className="space-y-6">
+            {/* 拍照批改的共享文件选择器 */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = ""; // 允许重复选择同一文件
+                    if (f) handleGradeFile(f);
+                }}
+            />
             {dueReviews.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950">
-                    <button
-                        type="button"
-                        className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-amber-900 dark:text-amber-200"
-                        onClick={() => setShowDueList((v) => !v)}
-                    >
-                        <Bell className="h-4 w-4" />
-                        <span>
-                            {t.filter.dueBanner || "Due for review today"}：{dueReviews.length} {t.filter.dueItems || ""}
-                        </span>
-                        <ChevronDown
-                            className={`ml-auto h-4 w-4 transition-transform ${showDueList ? "rotate-180" : ""}`}
-                        />
-                    </button>
+                    <div className="flex items-center">
+                        <button
+                            type="button"
+                            className="flex flex-1 items-center gap-2 px-4 py-3 text-left text-sm font-medium text-amber-900 dark:text-amber-200"
+                            onClick={() => setShowDueList((v) => !v)}
+                        >
+                            <Bell className="h-4 w-4" />
+                            <span>
+                                {t.filter.dueBanner || "Due for review today"}：{dueReviews.length} {t.filter.dueItems || ""}
+                            </span>
+                        </button>
+                        <button
+                            type="button"
+                            className="mr-2 flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-white dark:border-amber-800 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/40"
+                            onClick={() =>
+                                router.push(`/review/print${subjectId ? `?subjectId=${subjectId}` : ""}`)
+                            }
+                        >
+                            <Printer className="h-3.5 w-3.5" />
+                            {t.filter?.printDue || "打印复习卷"}
+                        </button>
+                        <button
+                            type="button"
+                            className="mr-3 flex h-6 w-6 shrink-0 items-center justify-center text-amber-900 dark:text-amber-200"
+                            onClick={() => setShowDueList((v) => !v)}
+                            aria-label="toggle"
+                        >
+                            <ChevronDown
+                                className={`h-4 w-4 transition-transform ${showDueList ? "rotate-180" : ""}`}
+                            />
+                        </button>
+                    </div>
                     {showDueList && (
-                        <ul className="divide-y divide-amber-100 border-t border-amber-200 dark:divide-amber-900 dark:border-amber-900">
-                            {dueReviews.slice(0, 10).map((d) => (
-                                <li key={d.errorItem.id}>
-                                    <Link
-                                        href={`/error-items/${d.errorItem.id}`}
-                                        className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-amber-100/60 dark:hover:bg-amber-900/40"
-                                    >
-                                        <span className="flex-1 truncate">
-                                            {cleanMarkdown(d.errorItem.questionText || "").slice(0, 60) || "（无题干）"}
-                                        </span>
-                                        {d.overdueDays > 0 && (
-                                            <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">
-                                                {(t.filter.dueOverdueDays || "overdue {days}d").replace("{days}", String(d.overdueDays))}
+                        <div className="divide-y divide-amber-100 border-t border-amber-200 dark:divide-amber-900 dark:border-amber-900">
+                            {dueGroups.map(([tag, items]) => (
+                                <div key={tag}>
+                                    <div className="bg-amber-100/60 px-4 py-1.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                        {tag} · {items.length}
+                                    </div>
+                                    {items.map((d) => (
+                                        <div
+                                            key={d.errorItem.id}
+                                            className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-amber-100/60 dark:hover:bg-amber-900/40"
+                                        >
+                                            <Link
+                                                href={`/error-items/${d.errorItem.id}`}
+                                                className="flex-1 truncate text-amber-900 dark:text-amber-200"
+                                            >
+                                                {cleanMarkdown(d.errorItem.questionText || "").slice(0, 60) || "（无题干）"}
+                                            </Link>
+                                            {d.overdueDays > 0 && (
+                                                <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">
+                                                    {(t.filter.dueOverdueDays || "overdue {days}d").replace("{days}", String(d.overdueDays))}
+                                                </span>
+                                            )}
+                                            <span className="flex shrink-0 items-center gap-1">
+                                                <button
+                                                    type="button"
+                                                    disabled={busy.has(d.errorItem.id)}
+                                                    onClick={() => startPhotoGrading(d.errorItem.id)}
+                                                    title={t.filter?.gradePhoto || "拍照批改：AI 对照参考答案点评"}
+                                                    className="flex h-6 w-6 items-center justify-center rounded-full border border-amber-600/70 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-40 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                                                >
+                                                    {busy.has(d.errorItem.id) ? (
+                                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
+                                                    ) : (
+                                                        <Camera className="h-3 w-3" />
+                                                    )}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={busy.has(d.errorItem.id)}
+                                                    onClick={() => startManualGrading(d.errorItem.id)}
+                                                    title={t.filter?.manualGrade || "手动输入答案批改：识别不佳时的兜底"}
+                                                    className="flex h-6 w-6 items-center justify-center rounded-full border border-amber-600/70 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-40 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                                                >
+                                                    <PenLine className="h-3 w-3" />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={busy.has(d.errorItem.id)}
+                                                    onClick={() => recordReview(d.errorItem.id, true)}
+                                                    title={t.filter?.recordCorrect || "做对，推进复习计划"}
+                                                    className="rounded-full border border-green-600/70 px-2 py-0.5 text-xs text-green-700 transition-colors hover:bg-green-50 disabled:opacity-40 dark:border-green-700 dark:text-green-400 dark:hover:bg-green-950/40"
+                                                >
+                                                    ✓
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    disabled={busy.has(d.errorItem.id)}
+                                                    onClick={() => recordReview(d.errorItem.id, false)}
+                                                    title={t.filter?.recordWrong || "做错，重置掌握度并重新安排复习"}
+                                                    className="rounded-full border border-red-600/70 px-2 py-0.5 text-xs text-red-700 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
+                                                >
+                                                    ✗
+                                                </button>
                                             </span>
-                                        )}
-                                    </Link>
-                                </li>
+                                        </div>
+                                    ))}
+                                </div>
                             ))}
-                        </ul>
+                        </div>
                     )}
                 </div>
             )}

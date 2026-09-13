@@ -30,6 +30,8 @@ import { frontendLogger } from "@/lib/frontend-logger";
 import { AppConfig, UserProfile, UpdateUserProfileRequest, OpenAIInstance } from "@/types/api";
 import { ModelSelector } from "@/components/ui/model-selector";
 import { PromptSettings } from "@/components/settings/prompt-settings";
+import { ReviewSettingsSection } from "@/components/settings/review-settings-section";
+import { VariantSettingsSection } from "@/components/settings/variant-settings-section";
 
 import { MessageSquareText, Info, ExternalLink, Github, ScrollText } from "lucide-react";
 const MAX_OPENAI_INSTANCES = 10;
@@ -768,6 +770,11 @@ export function SettingsDialog() {
                                 </p>
                             </div>
                         </div>
+
+                        {/* 每日复习设置（用户级数据，独立保存，不走下方 AI 配置保存按钮） */}
+                        <ReviewSettingsSection />
+                        {/* 举一反三自动生成设置（用户级数据，独立保存） */}
+                        <VariantSettingsSection />
                         <Button onClick={handleSaveSettings} disabled={saving} className="w-full">
                             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {t.settings?.save || "Save Settings"}

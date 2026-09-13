@@ -33,27 +33,28 @@ export async function GET(
             return forbidden("Not authorized");
         }
 
-        // 原题 join 源错题：requiresImage 实时值优先（快照后用户可编辑/补全），遮罩只能来自源错题
+        // 原题 join 源错题：requiresImage 实时值优先（快照后用户可编辑/补全），遮罩与错因只能来自源错题
         const sourceIds = paper.questions
             .filter((q) => !q.isVariant && q.sourceErrorItemId)
             .map((q) => q.sourceErrorItemId as string);
         const sources = sourceIds.length > 0
             ? await prisma.errorItem.findMany({
                 where: { id: { in: sourceIds } },
-                select: { id: true, requiresImage: true, imageMasks: true },
+                select: { id: true, requiresImage: true, imageMasks: true, errorCategory: true },
             })
             : [];
         const sourceById = new Map(sources.map((s) => [s.id, s]));
 
         const questions = paper.questions.map((q) => {
             if (q.isVariant || !q.sourceErrorItemId) {
-                return { ...q, imageMasks: [] };
+                return { ...q, imageMasks: [], errorCategory: null };
             }
             const source = sourceById.get(q.sourceErrorItemId);
             return {
                 ...q,
                 requiresImage: source?.requiresImage ?? q.requiresImage,
                 imageMasks: parseImageMasks(source?.imageMasks),
+                errorCategory: source?.errorCategory ?? null,
             };
         });
 

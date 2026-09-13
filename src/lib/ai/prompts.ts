@@ -620,6 +620,100 @@ const REANSWER_CONTEXT_TEMPLATE = `【学科提示 (SUBJECT HINT)】
 export const DEFAULT_REANSWER_TEMPLATE = `${REANSWER_STATIC_TEMPLATE}\n\n${REANSWER_CONTEXT_TEMPLATE}`;
 
 /**
+ * 批改任务 system 静态段：全局稳定（仅语言指令二分），置于请求最前以命中前缀缓存。
+ * 输入为孩子在纸质复习卷上一道题的作答图片（多模态），输出对/错判定 + 家长向点评。
+ */
+const GRADE_STATIC_TEMPLATE = `【角色与核心任务 (ROLE AND CORE TASK)】
+你是一位经验丰富的专业教师。家长上传了孩子在纸质复习卷上**一道题的作答图片**，请你对照题目与参考答案进行批改点评。
+
+{{language_instruction}}
+
+【批改要求 (GRADING REQUIREMENTS)】
+1. 对照参考答案判断作答正误：结论与过程均正确 → true；有错误、未完成或空白 → false。
+2. 点评面向家长，简明指出：作答亮点或错在哪一步、错因（如概念不清/计算失误/审题偏差），以及一句针对性的改进建议。
+3. 若作答以图片提供且图中没有可见作答（空白），判为 false，并在点评中说明「未看到作答痕迹」。
+4. 若作答以【学生作答】文字提供（家长/学生手动录入），可能有笔误或简化：按最接近的合理理解批改，不必苛求格式。
+
+【输出规范 (OUTPUT FORMAT)】
+你的响应输出**必须严格遵循以下自定义标签格式**。**严禁**使用 JSON 或 Markdown 代码块。
+
+请严格按照以下结构输出内容（不要包含任何其他文字）：
+
+<is_correct>
+true 或 false
+</is_correct>
+
+<comment>
+在此处填写批改点评（2~5 句）。
+* **直接使用标准的 LaTeX 符号**（如 $\\frac{1}{2}$），**不要**进行 JSON 转义。
+</comment>
+
+【!!! 关键格式与内容约束 (CRITICAL RULES) !!!】
+1. **格式严格**：只输出上述 2 个 XML 标签，不要输出其他内容。
+2. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。`;
+
+/**
+ * 批改任务的变量区（题目/参考答案随请求变化），渲染后置于 user 消息开头（作答图片之前）。
+ */
+const GRADE_CONTEXT_TEMPLATE = `【题目 (QUESTION)】
+{{question_text}}
+
+【参考答案 (REFERENCE ANSWER)】
+{{answer_text}}
+{{student_answer}}
+{{grade_instruction}}{{provider_hints}}`;
+
+export const DEFAULT_GRADE_TEMPLATE = `${GRADE_STATIC_TEMPLATE}\n\n${GRADE_CONTEXT_TEMPLATE}`;
+
+/**
+ * 构建批改任务提示词（缓存友好拆分版）：静态指令放 system，题目/参考答案随图片放 user。
+ */
+export function generateGradePromptParts(
+  language: 'zh' | 'en',
+  questionText: string,
+  answerText: string,
+  options?: PromptOptions,
+  gradeSemester?: string | null,
+  studentAnswer?: string
+): PromptParts {
+  const langInstruction = language === 'zh'
+    ? "IMPORTANT: The comment MUST be written in Simplified Chinese."
+    : "IMPORTANT: The comment MUST be written in English.";
+
+  const taskVariables = {
+    question_text: questionText.replace(/"/g, '\\"').replace(/\n/g, '\\n'),
+    answer_text: answerText.replace(/"/g, '\\"').replace(/\n/g, '\\n'),
+    student_answer: studentAnswer?.trim()
+      ? `【学生作答 (STUDENT ANSWER, 手动录入)】\n${studentAnswer.replace(/"/g, '\\"').replace(/\n/g, '\\n')}`
+      : '',
+    grade_instruction: generateGradeInstruction(gradeSemester),
+    provider_hints: options?.providerHints || ''
+  };
+
+  const userContext = replaceVariables(GRADE_CONTEXT_TEMPLATE, taskVariables).trim();
+  const systemPrompt = options?.customTemplate
+    ? replaceVariables(options.customTemplate, { language_instruction: langInstruction, ...taskVariables }).trim()
+    : replaceVariables(GRADE_STATIC_TEMPLATE, { language_instruction: langInstruction }).trim();
+
+  return { systemPrompt, userContext };
+}
+
+/**
+ * 构建批改任务提示词（整串版，azure-provider 兼容调用方）
+ */
+export function generateGradePrompt(
+  language: 'zh' | 'en',
+  questionText: string,
+  answerText: string,
+  options?: PromptOptions,
+  gradeSemester?: string | null,
+  studentAnswer?: string
+): string {
+  const { systemPrompt, userContext } = generateGradePromptParts(language, questionText, answerText, options, gradeSemester, studentAnswer);
+  return `${systemPrompt}\n\n${userContext}`;
+}
+
+/**
  * GeoGebra 任务 system 静态段：判断标准/命令规范/输出格式全局稳定，置于请求最前以命中前缀缓存。
  */
 const GEOGEBRA_STATIC_TEMPLATE = `【角色与核心任务 (ROLE AND CORE TASK)】

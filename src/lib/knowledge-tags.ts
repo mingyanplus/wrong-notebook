@@ -1,9 +1,41 @@
 /**
  * 知识点标签工具函数
- * 
+ *
  * 注意：课程数据已迁移到数据库，通过 seed scripts 导入。
  * 此文件仅保留通用工具函数。
  */
+
+/**
+ * 解析 DEPRECATED 的 knowledgePoints JSON 字段（tags 关联为空时的回退）。
+ * 坏数据（非 JSON/非数组）回空数组；字段彻底下线时统一改此处。
+ */
+export function parseLegacyKnowledgePoints(raw: string | null | undefined): string[] {
+    try {
+        const arr = JSON.parse(raw ?? "[]");
+        return Array.isArray(arr) ? arr.map(String) : [];
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * 按首个知识点标签分组（无标签归 untaggedLabel），组间保持首现顺序。
+ * 错题本到期横幅与复习卷打印页共用，分组口径锁在单一实现。
+ */
+export function groupByFirstTag<T>(
+    items: T[],
+    getTags: (item: T) => string[] | undefined,
+    untaggedLabel: string
+): Map<string, T[]> {
+    const map = new Map<string, T[]>();
+    for (const item of items) {
+        const tag = getTags(item)?.[0] ?? untaggedLabel;
+        const list = map.get(tag);
+        if (list) list.push(item);
+        else map.set(tag, [item]);
+    }
+    return map;
+}
 
 /**
  * 根据教育阶段和入学年份计算当前年级数字
