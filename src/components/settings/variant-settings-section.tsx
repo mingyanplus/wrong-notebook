@@ -30,28 +30,31 @@ export function VariantSettingsSection() {
     const [saved, setSaved] = useState(false);
     const [backfilling, setBackfilling] = useState(false);
 
-    const refresh = () => {
+    /** 拉取配置与进度；statsOnly=true 供轮询使用——只更新统计，不回写 settings，避免覆盖用户正在编辑的表单 */
+    const load = (statsOnly = false) =>
         apiClient
-            .get<{ settings: VariantSettings; stats: VariantStats }>("/api/variants/settings")
+            .get<{ settings?: VariantSettings; stats: VariantStats }>(`/api/variants/settings${statsOnly ? "?statsOnly=1" : ""}`)
             .then((d) => {
-                setSettings(d.settings);
-                setBaseline(d.settings);
+                if (!statsOnly && d.settings) {
+                    setSettings(d.settings);
+                    setBaseline(d.settings);
+                }
                 setStats(d.stats);
             })
             .catch(() => {});
-    };
 
     useEffect(() => {
-        apiClient
-            .get<{ settings: VariantSettings; stats: VariantStats }>("/api/variants/settings")
-            .then((d) => {
-                setSettings(d.settings);
-                setBaseline(d.settings);
-                setStats(d.stats);
-            })
-            .catch(() => {})
-            .finally(() => setLoading(false));
+        load().finally(() => setLoading(false));
     }, []);
+
+    // 后台生成存在缺口（服务端确认开启且未达标）时轮询进度，数字随后台入库实时变化；
+    // 达标或关闭弹窗后停止。
+    const hasGap = stats !== null && stats.enabled && stats.variantCount < stats.targetCount;
+    useEffect(() => {
+        if (!hasGap) return;
+        const timer = setInterval(() => load(true), 10000);
+        return () => clearInterval(timer);
+    }, [hasGap]);
 
     const save = async () => {
         setSaving(true);
@@ -60,7 +63,7 @@ export function VariantSettingsSection() {
             setSettings(result);
             setBaseline(result);
             setSaved(true);
-            refresh();
+            load();
         } catch {
             alert(t.common?.error || "保存失败");
         } finally {
@@ -86,7 +89,7 @@ export function VariantSettingsSection() {
                     String(result.queued)
                 )
             );
-            refresh();
+            load();
         } catch {
             alert(t.settings?.general?.variant?.backfillDisabled || "请先开启自动生成并设置数量");
         } finally {

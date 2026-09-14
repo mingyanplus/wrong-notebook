@@ -29,14 +29,16 @@ async function loadStats(userId: string) {
     };
 }
 
-/** 获取当前用户变式自动生成配置与题库进度统计（一次请求拿全） */
-export async function GET() {
+/** 获取当前用户变式自动生成配置与题库进度统计（一次请求拿全）；?statsOnly=1 时只返回统计供轮询使用 */
+export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session || !session.user) {
         return unauthorized();
     }
     try {
-        return NextResponse.json(await loadStats(session.user.id));
+        const { settings, stats } = await loadStats(session.user.id);
+        const statsOnly = new URL(req.url).searchParams.get("statsOnly") === "1";
+        return NextResponse.json(statsOnly ? { stats } : { settings, stats });
     } catch (error) {
         logger.error({ error }, 'Error fetching variant settings');
         return internalError("Failed to fetch variant settings");
