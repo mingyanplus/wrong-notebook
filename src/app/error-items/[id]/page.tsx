@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle, XCircle, RefreshCw, Trash2, Edit, Save, X, Box, Loader2, Eye, EyeOff, ImageIcon } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, RefreshCw, Trash2, Edit, Save, X, Box, Loader2, Eye, EyeOff, ImageIcon, Sparkles } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -14,7 +14,7 @@ import { TagInput } from "@/components/tag-input";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiClient } from "@/lib/api-client";
-import { UserProfile, Notebook } from "@/types/api";
+import { UserProfile, Notebook, AnalyzeResponse } from "@/types/api";
 import { inferSubjectFromName } from "@/lib/knowledge-tags";
 import { getMistakeStatusLabel, normalizeMistakeStatusForSave } from "@/lib/mistake-status";
 import { getErrorCategoryLabel, getQuestionTypeLabel } from "@/lib/error-categories";
@@ -78,6 +78,7 @@ export default function ErrorDetailPage() {
 
     const [isAnalyzingGeogebra, setIsAnalyzingGeogebra] = useState(false);
     const [geogebraError, setGeogebraError] = useState<string | null>(null);
+    const [isReanalyzing, setIsReanalyzing] = useState(false);
     const [showQuestionImage, setShowQuestionImage] = useState(false);
     const [showReferenceImage, setShowReferenceImage] = useState(false);
     const [showOwnImage, setShowOwnImage] = useState(false);
@@ -109,6 +110,56 @@ export default function ErrorDetailPage() {
             router.push("/notebooks");
         } finally {
             setLoading(false);
+        }
+    };
+
+    // AI 重新识别：把已存的原题图片重新交给 /api/analyze，结果经 PUT 回填（覆盖识别字段，笔记/元数据保留）
+    const handleReanalyze = async () => {
+        if (!item) return;
+        if (!item.originalImageUrl) {
+            alert(t.detail?.reanalyzeNoImage || "该错题没有原题图片，无法重新识别");
+            return;
+        }
+        if (!confirm(t.detail?.reanalyzeConfirm || "将对原题图片重新 AI 识别，覆盖题干、答案、解析、错因与标签（笔记和元数据保留）。是否继续？")) return;
+
+        setIsReanalyzing(true);
+        try {
+            const result = await apiClient.post<AnalyzeResponse>("/api/analyze", {
+                imageBase64: item.originalImageUrl,
+                language,
+                subjectId: item.subjectId || undefined,
+            }, { timeout: 180000 });
+
+            await apiClient.put(`/api/error-items/${item.id}`, {
+                questionText: result.questionText,
+                answerText: result.answerText,
+                analysis: result.analysis,
+                wrongAnswerText: result.wrongAnswerText,
+                mistakeAnalysis: result.mistakeAnalysis,
+                mistakeStatus: result.mistakeStatus,
+                errorCategory: result.errorCategory === "unknown" ? null : result.errorCategory,
+                secondaryErrorCategories: result.secondaryErrorCategories,
+                questionType: result.questionType,
+                requiresImage: result.requiresImage,
+                knowledgePoints: result.knowledgePoints,
+            });
+
+            await fetchItem(item.id);
+            alert(t.detail?.reanalyzeSuccess || "重新识别完成");
+        } catch (error) {
+            console.error("Reanalyze failed:", error);
+            const err = error as { data?: { message?: string }; message?: string };
+            const msg = err?.data?.message || err?.message || "";
+            const errorText = msg.includes("AI_AUTH_ERROR")
+                ? (t.errors?.AI_AUTH_ERROR || "AI 服务认证失败，请检查 API Key 配置。")
+                : msg.includes("AI_CONNECTION")
+                    ? (t.errors?.AI_CONNECTION_FAILED || "网络连接失败，请检查网络设置。")
+                    : msg.includes("AI_RESPONSE_ERROR")
+                        ? (t.errors?.AI_RESPONSE_ERROR || "AI 返回数据格式异常，请重试。")
+                        : (t.detail?.reanalyzeFailed || "重新识别失败");
+            alert(errorText);
+        } finally {
+            setIsReanalyzing(false);
         }
     };
 
@@ -488,6 +539,18 @@ export default function ErrorDetailPage() {
                     </div>
 
                     <div className="flex gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleReanalyze}
+                            disabled={isReanalyzing || !item.originalImageUrl}
+                        >
+                            {isReanalyzing ? (
+                                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t.detail?.reanalyzing || "AI 识别中..."}</>
+                            ) : (
+                                <><Sparkles className="mr-2 h-4 w-4" />{t.detail?.reanalyze || "AI 重新识别"}</>
+                            )}
+                        </Button>
                         <Link href={`/practice?id=${item.id}`}>
                             <Button variant="outline" size="sm">
                                 <RefreshCw className="mr-2 h-4 w-4" />
