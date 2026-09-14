@@ -42,26 +42,99 @@ type KnowledgeFilterChange = {
     tag?: string | null;
 };
 
+// --- 列表偏好持久化：记住用户的筛选/排序/搜索/页码浏览习惯（按错题本分开存，避免互相污染）---
+type SortOrder = "desc" | "asc";
+
+interface ErrorListPrefs {
+    search: string;
+    masteryFilter: "all" | "mastered" | "unmastered";
+    timeFilter: "all" | "week" | "month";
+    gradeFilter: string;
+    chapterFilter: string;
+    paperLevelFilter: "all" | "a" | "b" | "other";
+    errorCategoryFilter: string;
+    sourceFilter: string;
+    selectedTag: string | null;
+    sortOrder: SortOrder;
+    page: number;
+}
+
+const DEFAULT_PREFS: ErrorListPrefs = {
+    search: "",
+    masteryFilter: "unmastered",
+    timeFilter: "all",
+    gradeFilter: "",
+    chapterFilter: "",
+    paperLevelFilter: "all",
+    errorCategoryFilter: "all",
+    sourceFilter: "all",
+    selectedTag: null,
+    sortOrder: "desc",
+    page: 1,
+};
+
+/** 枚举型偏好字段的合法值表（其余字段按类型兜底） */
+const PREF_ENUMS = {
+    masteryFilter: ["all", "mastered", "unmastered"],
+    timeFilter: ["all", "week", "month"],
+    paperLevelFilter: ["all", "a", "b", "other"],
+    sortOrder: ["desc", "asc"],
+} as const;
+
+function getPrefsKey(subjectId?: string): string {
+    return `error-list-prefs:${subjectId || "all"}`;
+}
+
+function readPrefs(subjectId?: string): ErrorListPrefs {
+    if (typeof window === "undefined") return DEFAULT_PREFS;
+    try {
+        const raw = window.localStorage.getItem(getPrefsKey(subjectId));
+        if (!raw) return DEFAULT_PREFS;
+        const p = { ...DEFAULT_PREFS, ...JSON.parse(raw) } as ErrorListPrefs;
+        // 逐字段兜底：写入方是本组件自身，脏数据只可能来自旧版本残留
+        for (const key of Object.keys(PREF_ENUMS) as (keyof typeof PREF_ENUMS)[]) {
+            if (!(PREF_ENUMS[key] as readonly string[]).includes(p[key])) {
+                // 联合 key 的索引写入会被 TS 收窄为 never，经 Record 断言绕过（各枚举字段均为 string 字面量联合）
+                (p as Record<typeof key, string>)[key] = DEFAULT_PREFS[key];
+            }
+        }
+        for (const key of ["search", "gradeFilter", "chapterFilter"] as const) {
+            if (typeof p[key] !== "string") p[key] = "";
+        }
+        for (const key of ["errorCategoryFilter", "sourceFilter"] as const) {
+            if (typeof p[key] !== "string") p[key] = "all";
+        }
+        if (typeof p.selectedTag !== "string") p.selectedTag = null;
+        if (!Number.isInteger(p.page) || p.page < 1) p.page = 1;
+        return p;
+    } catch {
+        return DEFAULT_PREFS;
+    }
+}
+
+/** 筛选键 = 除 page 外的全部偏好字段（page 变化不算筛选变化，不触发页码重置） */
+const FILTER_KEYS: (keyof Omit<ErrorListPrefs, "page">)[] = [
+    "search", "masteryFilter", "timeFilter", "selectedTag", "gradeFilter",
+    "chapterFilter", "paperLevelFilter", "errorCategoryFilter", "sourceFilter", "sortOrder",
+];
+
 export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const [items, setItems] = useState<ErrorItem[]>([]);
     const [, setLoading] = useState(true);
-    const [search, setSearch] = useState("");
-    const [masteryFilter, setMasteryFilter] = useState<"all" | "mastered" | "unmastered">("unmastered");
-    const [timeFilter, setTimeFilter] = useState<"all" | "week" | "month">("all");
-    const [gradeFilter, setGradeFilter] = useState("");
-    const [chapterFilter, setChapterFilter] = useState("");
-    const [paperLevelFilter, setPaperLevelFilter] = useState<"all" | "a" | "b" | "other">("all");
-    const [errorCategoryFilter, setErrorCategoryFilter] = useState<string>("all");
+    // 浏览偏好：单个 state 对象（lazy init 读 localStorage，SSR/无存储回落默认值），切换错题本时由下方 effect 原子恢复
+    const [prefs, setPrefs] = useState<ErrorListPrefs>(() => readPrefs(subjectId));
+    const updatePrefs = (patch: Partial<ErrorListPrefs>) => setPrefs((p) => ({ ...p, ...patch }));
+    const {
+        search, masteryFilter, timeFilter, gradeFilter, chapterFilter,
+        paperLevelFilter, errorCategoryFilter, sourceFilter, selectedTag, sortOrder, page,
+    } = prefs;
     const [isBackfilling, setIsBackfilling] = useState(false);
-    const [sourceFilter, setSourceFilter] = useState<string>("all");
     const [availableSources, setAvailableSources] = useState<string[]>([]);
-    const [selectedTag, setSelectedTag] = useState<string | null>(null);
     const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
     // 到期待复习（艾宾浩斯计划）；knowledgeTags 供按知识点分组现做（用户流程：按知识点×错因过重点题）
     const [dueReviews, setDueReviews] = useState<Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null; knowledgeTags?: string[] } }>>([]);
     const [showDueList, setShowDueList] = useState(false);
-    // 分页状态
-    const [page, setPage] = useState(1);
+    // 分页状态（pageSize/total/totalPages 非偏好，page 在 prefs 内持久化）
     const [pageSize] = useState(DEFAULT_PAGE_SIZE);
     const [total, setTotal] = useState(0);
     const [totalPages, setTotalPages] = useState(0);
@@ -89,6 +162,25 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         return () => { cancelled = true; };
     }, [subjectId]);
 
+    // 追踪上次的筛选上下文（用于判断是否需要重置页码；切换错题本时恢复逻辑会直接改写）
+    const prevRef = useRef({ subjectId, prefs });
+
+    // 切换错题本时（同组件实例复用、params 变化）原子恢复该本的浏览偏好。首次挂载已由 lazy init 完成，不重复处理。
+    // skipFetchRef/skipSaveRef：恢复值要到下一轮渲染才生效，跳过随后那一轮的请求与写入，
+    // 避免用旧本的筛选值请求新本、或把旧本的值写进新本的 key。
+    const lastSubjectIdRef = useRef(subjectId);
+    const skipFetchRef = useRef(false);
+    const skipSaveRef = useRef(false);
+    useEffect(() => {
+        if (lastSubjectIdRef.current === subjectId) return;
+        lastSubjectIdRef.current = subjectId;
+        const next = readPrefs(subjectId);
+        setPrefs(next);
+        prevRef.current = { subjectId, prefs: next };
+        skipFetchRef.current = true;
+        skipSaveRef.current = true;
+    }, [subjectId]);
+
     const handleExportPrint = () => {
         const params = new URLSearchParams();
         if (subjectId) params.append("subjectId", subjectId);
@@ -112,28 +204,28 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     };
 
     const handleTagClick = (tag: string) => {
-        setSelectedTag(selectedTag === tag ? null : tag);
+        updatePrefs({ selectedTag: selectedTag === tag ? null : tag });
     };
 
     const handleFilterChange = ({ gradeSemester, chapter, tag }: KnowledgeFilterChange) => {
-        if (gradeSemester !== undefined) setGradeFilter(gradeSemester);
-        if (chapter !== undefined) setChapterFilter(chapter);
-        // 注意：tag 可能是 undefined（表示清除），需要用 'tag' in obj 来判断是否传入了该参数
-        // 但由于我们的结构是直接解构，这里改用 null 作为清除标识
-        // 实际上 KnowledgeFilter 传入的是 { tag: undefined }，所以 tag 参数确实会被设置
-        // 问题在于 !== undefined 不能区分"未传入"和"传入undefined"
-        // 正确的做法是检查参数对象中是否有该 key
-        setSelectedTag(tag === undefined ? null : tag);
+        setPrefs((p) => {
+            const next = { ...p };
+            if (gradeSemester !== undefined) next.gradeFilter = gradeSemester;
+            if (chapter !== undefined) next.chapterFilter = chapter;
+            // 注意：tag 可能是 undefined（表示清除），用 null 作为清除标识
+            next.selectedTag = tag === undefined ? null : tag;
 
-        // Clear dependent filters and reset page
-        if (!gradeSemester) {
-            setGradeFilter("");
-            setChapterFilter("");
-            setSelectedTag(null);
-        } else if (!chapter) {
-            setChapterFilter("");
-        }
-        setPage(1); // 筛选变化时重置页码
+            // Clear dependent filters and reset page
+            if (!gradeSemester) {
+                next.gradeFilter = "";
+                next.chapterFilter = "";
+                next.selectedTag = null;
+            } else if (!chapter) {
+                next.chapterFilter = "";
+            }
+            next.page = 1; // 筛选变化时重置页码
+            return next;
+        });
     };
 
     // 使用服务端 items 直接渲染，章节过滤已在 KnowledgeFilter 中通过 tag 实现
@@ -197,35 +289,42 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         }
     };
 
-    // 追踪筛选条件是否变化（用于判断是否需要重置页码）
-    const prevFiltersRef = useRef({ search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter, sourceFilter });
-
     useEffect(() => {
-        const prevFilters = prevFiltersRef.current;
+        // 切换错题本后恢复偏好的那一轮：旧 prefs 值不可信，跳过本次请求，等恢复值生效后再拉取
+        if (skipFetchRef.current) {
+            skipFetchRef.current = false;
+            return;
+        }
+
+        const prev = prevRef.current;
         const filtersChanged =
-            prevFilters.search !== search ||
-            prevFilters.masteryFilter !== masteryFilter ||
-            prevFilters.timeFilter !== timeFilter ||
-            prevFilters.selectedTag !== selectedTag ||
-            prevFilters.subjectId !== subjectId ||
-            prevFilters.gradeFilter !== gradeFilter ||
-            prevFilters.chapterFilter !== chapterFilter ||
-            prevFilters.paperLevelFilter !== paperLevelFilter ||
-            prevFilters.errorCategoryFilter !== errorCategoryFilter ||
-            prevFilters.sourceFilter !== sourceFilter;
+            prev.subjectId !== subjectId ||
+            FILTER_KEYS.some((k) => prev.prefs[k] !== prefs[k]);
 
         // 更新 ref
-        prevFiltersRef.current = { search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter, sourceFilter };
+        prevRef.current = { subjectId, prefs };
 
-        if (filtersChanged && page !== 1) {
+        if (filtersChanged && prefs.page !== 1) {
             // 筛选条件变化且不在第一页，重置到第一页（会再次触发此 effect）
-            setPage(1);
+            setPrefs((p) => ({ ...p, page: 1 }));
             return;
         }
 
         // 正常请求数据
         fetchItems();
-    }, [page, search, masteryFilter, timeFilter, selectedTag, subjectId, gradeFilter, chapterFilter, paperLevelFilter, errorCategoryFilter, sourceFilter]);
+    }, [subjectId, prefs]);
+
+    // 偏好持久化：筛选/排序/搜索/页码变化时写入 localStorage（按错题本分开存），
+    // 重新进入列表（含点进详情后返回）时由 lazy init 自动恢复
+    useEffect(() => {
+        if (skipSaveRef.current) {
+            skipSaveRef.current = false;
+            return;
+        }
+        try {
+            window.localStorage.setItem(getPrefsKey(subjectId), JSON.stringify(prefs));
+        } catch { /* 忽略隐私模式等写入失败 */ }
+    }, [subjectId, prefs]);
 
     const fetchItems = async () => {
         setLoading(true);
@@ -247,6 +346,8 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
             if (paperLevelFilter !== "all") params.append("paperLevel", paperLevelFilter);
             if (errorCategoryFilter !== "all") params.append("errorCategory", errorCategoryFilter);
             if (sourceFilter !== "all") params.append("source", sourceFilter);
+            // 排序：最新在前 / 最早在前
+            params.append("sortOrder", sortOrder);
             // 分页参数
             params.append("page", page.toString());
             params.append("pageSize", pageSize.toString());
@@ -470,7 +571,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                         placeholder={t.notebook.search}
                         className="pl-9"
                         value={search}
-                        onChange={(e) => setSearch(e.target.value)}
+                        onChange={(e) => updatePrefs({ search: e.target.value })}
                     />
                 </div>
                 <DropdownMenu>
@@ -483,28 +584,43 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuLabel>{t.filter.masteryStatus || "Mastery Status"}</DropdownMenuLabel>
-                        <DropdownMenuItem onClick={() => setMasteryFilter("all")}>
+                        <DropdownMenuItem onClick={() => updatePrefs({ masteryFilter: "all" })}>
                             {masteryFilter === "all" && "✓ "}{t.filter.all || "All"}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setMasteryFilter("unmastered")}>
+                        <DropdownMenuItem onClick={() => updatePrefs({ masteryFilter: "unmastered" })}>
                             {masteryFilter === "unmastered" && "✓ "}{t.filter.review || "To Review"}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setMasteryFilter("mastered")}>
+                        <DropdownMenuItem onClick={() => updatePrefs({ masteryFilter: "mastered" })}>
                             {masteryFilter === "mastered" && "✓ "}{t.filter.mastered || "Mastered"}
                         </DropdownMenuItem>
 
                         <DropdownMenuSeparator />
 
                         <DropdownMenuLabel>{t.filter.timeRange || "Time Range"}</DropdownMenuLabel>
-                        <DropdownMenuItem onClick={() => setTimeFilter("all")}>
+                        <DropdownMenuItem onClick={() => updatePrefs({ timeFilter: "all" })}>
                             {timeFilter === "all" && "✓ "}{t.filter.allTime || "All Time"}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setTimeFilter("week")}>
+                        <DropdownMenuItem onClick={() => updatePrefs({ timeFilter: "week" })}>
                             {timeFilter === "week" && "✓ "}{t.filter.lastWeek || "Last Week"}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setTimeFilter("month")}>
+                        <DropdownMenuItem onClick={() => updatePrefs({ timeFilter: "month" })}>
                             {timeFilter === "month" && "✓ "}{t.filter.lastMonth || "Last Month"}
                         </DropdownMenuItem>
+
+                        <DropdownMenuSeparator />
+
+                        <DropdownMenuLabel>{t.filter.sortOrder || "Sort Order"}</DropdownMenuLabel>
+                        <DropdownMenuItem onClick={() => updatePrefs({ sortOrder: "desc" })}>
+                            {sortOrder === "desc" && "✓ "}{t.filter.sortDesc || "Newest First"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => updatePrefs({ sortOrder: "asc" })}>
+                            {sortOrder === "asc" && "✓ "}{t.filter.sortAsc || "Oldest First"}
+                        </DropdownMenuItem>
+                        {sortOrder === "asc" && (
+                            <DropdownMenuItem onClick={() => updatePrefs({ sortOrder: "desc" })}>
+                                {t.filter.sortReset || "Reset to Default (Newest First)"}
+                            </DropdownMenuItem>
+                        )}
                     </DropdownMenuContent>
                 </DropdownMenu>
                 <Button variant="outline" onClick={handleExportPrint}>
@@ -538,34 +654,34 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                     <Button
                         variant={paperLevelFilter === "all" ? "secondary" : "outline"}
                         size="sm"
-                        onClick={() => setPaperLevelFilter("all")}
+                        onClick={() => updatePrefs({ paperLevelFilter: "all" })}
                     >
                         {t.filter.all || "All"}
                     </Button>
                     <Button
                         variant={paperLevelFilter === "a" ? "secondary" : "outline"}
                         size="sm"
-                        onClick={() => setPaperLevelFilter("a")}
+                        onClick={() => updatePrefs({ paperLevelFilter: "a" })}
                     >
                         {t.editor.paperLevels?.a || "Paper A"}
                     </Button>
                     <Button
                         variant={paperLevelFilter === "b" ? "secondary" : "outline"}
                         size="sm"
-                        onClick={() => setPaperLevelFilter("b")}
+                        onClick={() => updatePrefs({ paperLevelFilter: "b" })}
                     >
                         {t.editor.paperLevels?.b || "Paper B"}
                     </Button>
                     <Button
                         variant={paperLevelFilter === "other" ? "secondary" : "outline"}
                         size="sm"
-                        onClick={() => setPaperLevelFilter("other")}
+                        onClick={() => updatePrefs({ paperLevelFilter: "other" })}
                     >
                         {t.editor.paperLevels?.other || "Other"}
                     </Button>
                     <Select
                         value={errorCategoryFilter}
-                        onValueChange={(val) => setErrorCategoryFilter(val)}
+                        onValueChange={(val) => updatePrefs({ errorCategoryFilter: val })}
                     >
                         <SelectTrigger className="h-8 w-[140px]">
                             <SelectValue />
@@ -605,7 +721,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                         <span className="hidden sm:inline">{isBackfilling ? (t.filter.backfillRunning || "补全中…") : (t.filter.backfill || "批量补全")}</span>
                     </Button>
                     {availableSources.length > 0 && (
-                        <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                        <Select value={sourceFilter} onValueChange={(val) => updatePrefs({ sourceFilter: val })}>
                             <SelectTrigger className="h-8 w-[150px]">
                                 <SelectValue />
                             </SelectTrigger>
@@ -625,7 +741,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                     <span className="text-sm text-muted-foreground">
                         {t.filter.filteringByTag || "Filtering by tag"}:
                     </span>
-                    <Badge variant="secondary" className="cursor-pointer" onClick={() => setSelectedTag(null)}>
+                    <Badge variant="secondary" className="cursor-pointer" onClick={() => updatePrefs({ selectedTag: null })}>
                         {selectedTag}
                         <span className="ml-1 text-xs">×</span>
                     </Badge>
@@ -744,7 +860,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                 totalPages={totalPages}
                 total={total}
                 pageSize={pageSize}
-                onPageChange={setPage}
+                onPageChange={(page) => updatePrefs({ page })}
             />
 
             {/* 多选模式底部操作栏 */}

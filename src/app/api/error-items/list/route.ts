@@ -25,6 +25,9 @@ export async function GET(req: Request) {
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(MIN_PAGE_SIZE, parseInt(searchParams.get("pageSize") || String(DEFAULT_PAGE_SIZE), 10)));
 
+    // 排序：按创建时间正序/逆序（默认逆序=最新在前，与历史行为一致）
+    const sortOrder = searchParams.get("sortOrder") === "asc" ? "asc" as const : "desc" as const;
+
     try {
         let user;
         if (session?.user?.email) {
@@ -163,7 +166,7 @@ export async function GET(req: Request) {
         // 分页查询
         const errorItems = await prisma.errorItem.findMany({
             where: whereClause,
-            orderBy: { createdAt: "desc" },
+            orderBy: { createdAt: sortOrder },
             include: {
                 subject: true,
                 tags: true,
