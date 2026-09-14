@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, CheckCircle, XCircle, RefreshCw, Trash2, Edit, Save, X, Box, Loader2, Eye, EyeOff, ImageIcon, Sparkles } from "lucide-react";
+import { ArrowLeft, CheckCircle, XCircle, RefreshCw, Trash2, Edit, Save, X, Box, Loader2, Eye, EyeOff, ImageIcon, Sparkles, Brain } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import Link from "next/link";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { apiClient } from "@/lib/api-client";
 import { UserProfile, Notebook, AnalyzeResponse } from "@/types/api";
+import type { ReanswerQuestionResult } from "@/lib/ai/types";
 import { inferSubjectFromName } from "@/lib/knowledge-tags";
 import { getMistakeStatusLabel, normalizeMistakeStatusForSave } from "@/lib/mistake-status";
 import { getErrorCategoryLabel, getQuestionTypeLabel } from "@/lib/error-categories";
@@ -79,39 +80,17 @@ export default function ErrorDetailPage() {
     const [isAnalyzingGeogebra, setIsAnalyzingGeogebra] = useState(false);
     const [geogebraError, setGeogebraError] = useState<string | null>(null);
     const [isReanalyzing, setIsReanalyzing] = useState(false);
-    const [showQuestionImage, setShowQuestionImage] = useState(false);
-    const [showReferenceImage, setShowReferenceImage] = useState(false);
-    const [showOwnImage, setShowOwnImage] = useState(false);
-    const [showFloatingQuestion, setShowFloatingQuestion] = useState(false);
-    const questionRef = useRef<HTMLDivElement>(null);
+    const [isReanswering, setIsReanswering] = useState(false);
 
-    useEffect(() => {
-        // Fetch user info for education stage
-        apiClient.get<UserProfile>("/api/user")
-            .then(user => {
-                if (user && user.educationStage) {
-                    setEducationStage(user.educationStage);
-                }
-            })
-            .catch(err => console.error("Failed to fetch user info:", err));
-
-        if (params.id) {
-            fetchItem(params.id as string);
-        }
-    }, [params.id]);
-
-    const fetchItem = async (id: string) => {
-        try {
-            const data = await apiClient.get<ErrorItemDetail>(`/api/error-items/${id}`);
-            setItem(data);
-        } catch (error) {
-            console.error(error);
-            alert(t.common?.messages?.loadFailed || 'Failed to load item');
-            router.push("/notebooks");
-        } finally {
-            setLoading(false);
-        }
-    };
+    // AI 错误码 → 本地化提示（重新识别 / AI 重做共用）
+    const aiErrorText = (msg: string, fallback: string): string =>
+        msg.includes("AI_AUTH_ERROR")
+            ? (t.errors?.AI_AUTH_ERROR || "AI 服务认证失败，请检查 API Key 配置。")
+            : msg.includes("AI_CONNECTION")
+                ? (t.errors?.AI_CONNECTION_FAILED || "网络连接失败，请检查网络设置。")
+                : msg.includes("AI_RESPONSE_ERROR")
+                    ? (t.errors?.AI_RESPONSE_ERROR || "AI 返回数据格式异常，请重试。")
+                    : fallback;
 
     // AI 重新识别：把已存的原题图片重新交给 /api/analyze，结果经 PUT 回填（覆盖识别字段，笔记/元数据保留）
     const handleReanalyze = async () => {
@@ -150,16 +129,76 @@ export default function ErrorDetailPage() {
             console.error("Reanalyze failed:", error);
             const err = error as { data?: { message?: string }; message?: string };
             const msg = err?.data?.message || err?.message || "";
-            const errorText = msg.includes("AI_AUTH_ERROR")
-                ? (t.errors?.AI_AUTH_ERROR || "AI 服务认证失败，请检查 API Key 配置。")
-                : msg.includes("AI_CONNECTION")
-                    ? (t.errors?.AI_CONNECTION_FAILED || "网络连接失败，请检查网络设置。")
-                    : msg.includes("AI_RESPONSE_ERROR")
-                        ? (t.errors?.AI_RESPONSE_ERROR || "AI 返回数据格式异常，请重试。")
-                        : (t.detail?.reanalyzeFailed || "重新识别失败");
-            alert(errorText);
+            alert(aiErrorText(msg, t.detail?.reanalyzeFailed || "重新识别失败"));
         } finally {
             setIsReanalyzing(false);
+        }
+    };
+
+    // AI 重做：用已识别的题干重新解题（走 /api/reanswer），只覆盖参考答案与解析，题干/错因/标签等识别结果保留
+    const handleReanswer = async () => {
+        if (!item) return;
+        if (!item.questionText?.trim()) {
+            alert(t.detail?.reanswerNoQuestion || "题目文本为空，无法重做");
+            return;
+        }
+        if (!confirm(t.detail?.reanswerConfirm || "将用 AI 重新解答本题，覆盖参考答案与解析（题干、错因、标签等识别结果保留）。是否继续？")) return;
+
+        setIsReanswering(true);
+        try {
+            const result = await apiClient.post<ReanswerQuestionResult>("/api/reanswer", {
+                questionText: item.questionText,
+                language,
+                subject: item.subject?.name || undefined,
+                gradeSemester: item.gradeSemester || undefined,
+            }, { timeout: 180000 });
+
+            await apiClient.put(`/api/error-items/${item.id}`, {
+                answerText: result.answerText,
+                analysis: result.analysis,
+            });
+            setItem({ ...item, answerText: result.answerText, analysis: result.analysis });
+            alert(t.detail?.reanswerSuccess || "AI 重做完成");
+        } catch (error) {
+            console.error("Reanswer failed:", error);
+            const err = error as { data?: { message?: string }; message?: string };
+            const msg = err?.data?.message || err?.message || "";
+            alert(aiErrorText(msg, t.detail?.reanswerFailed || "AI 重做失败"));
+        } finally {
+            setIsReanswering(false);
+        }
+    };
+    const [showQuestionImage, setShowQuestionImage] = useState(false);
+    const [showReferenceImage, setShowReferenceImage] = useState(false);
+    const [showOwnImage, setShowOwnImage] = useState(false);
+    const [showFloatingQuestion, setShowFloatingQuestion] = useState(false);
+    const questionRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        // Fetch user info for education stage
+        apiClient.get<UserProfile>("/api/user")
+            .then(user => {
+                if (user && user.educationStage) {
+                    setEducationStage(user.educationStage);
+                }
+            })
+            .catch(err => console.error("Failed to fetch user info:", err));
+
+        if (params.id) {
+            fetchItem(params.id as string);
+        }
+    }, [params.id]);
+
+    const fetchItem = async (id: string) => {
+        try {
+            const data = await apiClient.get<ErrorItemDetail>(`/api/error-items/${id}`);
+            setItem(data);
+        } catch (error) {
+            console.error(error);
+            alert(t.common?.messages?.loadFailed || 'Failed to load item');
+            router.push("/notebooks");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -549,6 +588,18 @@ export default function ErrorDetailPage() {
                                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t.detail?.reanalyzing || "AI 识别中..."}</>
                             ) : (
                                 <><Sparkles className="mr-2 h-4 w-4" />{t.detail?.reanalyze || "AI 重新识别"}</>
+                            )}
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleReanswer}
+                            disabled={isReanswering || !item.questionText}
+                        >
+                            {isReanswering ? (
+                                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t.detail?.reanswering || "AI 解题中..."}</>
+                            ) : (
+                                <><Brain className="mr-2 h-4 w-4" />{t.detail?.reanswer || "AI 重做"}</>
                             )}
                         </Button>
                         <Link href={`/practice?id=${item.id}`}>
