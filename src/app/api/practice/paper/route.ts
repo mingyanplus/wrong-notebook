@@ -101,12 +101,12 @@ export async function POST(req: Request) {
             (i) => i.id
         );
 
-        // ── 变式生成（并发池 + 重试 3 次 + 失败降级原题）──────
+        // ── 变式生成（按错题分组批量请求 + 并发池 + 重试 3 次 + 失败降级原题）──────
         const aiService = getAIService();
         const degraded: string[] = [];
-        type DraftVariant = { questionText: string; answerText: string; analysis: string; knowledgePoints: string[]; questionType: string };
+        type DraftVariant = { questionText: string; answerText: string; analysis: string; questionType: string };
 
-        async function generateVariantFor(item: ItemWithRels): Promise<DraftVariant | null> {
+        async function generateVariantsFor(item: ItemWithRels, count: number): Promise<DraftVariant[] | null> {
 
             const hintParts: string[] = [];
             if (item.errorCategory && item.errorCategory !== "unknown") {
@@ -123,21 +123,21 @@ export async function POST(req: Request) {
             let lastError: unknown = null;
             for (let attempt = 0; attempt < AI_RETRIES; attempt++) {
                 try {
-                    const q = await aiService.generateSimilarQuestion(
+                    // 同一错题的多道变式一次批量请求（解构原题的思考只付一次）
+                    const qs = await aiService.generateSimilarQuestions(
                         item.questionText || "",
                         tags,
+                        [{ difficulty: body.difficulty ?? "medium", count }],
                         "zh",
-                        body.difficulty ?? "medium",
                         item.gradeSemester,
                         mistakeHint
                     );
-                    return {
+                    return qs.map((q) => ({
                         questionText: q.questionText,
                         answerText: q.answerText,
                         analysis: q.analysis,
-                        knowledgePoints: q.knowledgePoints,
-                        questionType: item.questionType || q.questionType || "solve",
-                    };
+                        questionType: item.questionType || "solve",
+                    }));
                 } catch (error) {
                     lastError = error;
                 }
@@ -146,17 +146,29 @@ export async function POST(req: Request) {
             return null;
         }
 
-        // 计划中的变式项并发生成（单题失败 → 降级为原题，不减少题数）
+        // 计划中同一错题的多个变式项合并成一次批量生成（单题失败/少生成 → 缺口降级为原题，不减少题数）
         const variantByPlanIndex = new Map<number, DraftVariant | null>();
-        let planCursor = 0;
+        const variantIdxByItem = new Map<string, number[]>();
+        plan.forEach(({ item, isVariant }, idx) => {
+            if (!isVariant) return;
+            const list = variantIdxByItem.get(item.id) ?? [];
+            list.push(idx);
+            variantIdxByItem.set(item.id, list);
+        });
+
+        const itemEntries = [...variantIdxByItem.entries()];
+        let itemCursor = 0;
         await Promise.all(
-            Array.from({ length: Math.min(CONCURRENCY, plan.length) }, async () => {
-                while (planCursor < plan.length) {
-                    const idx = planCursor++;
-                    if (!plan[idx].isVariant) continue;
-                    const variant = await generateVariantFor(plan[idx].item);
-                    variantByPlanIndex.set(idx, variant);
-                    if (!variant) degraded.push(plan[idx].item.id);
+            Array.from({ length: Math.min(CONCURRENCY, itemEntries.length) }, async () => {
+                while (itemCursor < itemEntries.length) {
+                    const [itemId, idxs] = itemEntries[itemCursor++];
+                    const item = plan[idxs[0]].item;
+                    const variants = await generateVariantsFor(item, idxs.length);
+                    idxs.forEach((idx, i) => {
+                        const v = variants?.[i] ?? null;
+                        variantByPlanIndex.set(idx, v);
+                        if (!v) degraded.push(itemId);
+                    });
                 }
             })
         );
@@ -180,7 +192,7 @@ export async function POST(req: Request) {
                     questionText: v.questionText,
                     answerText: v.answerText,
                     analysis: v.analysis,
-                    knowledgePoints: JSON.stringify(v.knowledgePoints),
+                    knowledgePoints: "[]", // similar 模板不输出知识点标签（改造前同为空数组）
                     originalImageUrl: null,
                     requiresImage: null,
                 };

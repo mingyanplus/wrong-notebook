@@ -8,6 +8,8 @@ import {
     generateAnalyzePromptParts,
     generateSimilarQuestionPrompt,
     generateSimilarQuestionPromptParts,
+    generateSimilarBatchPrompt,
+    generateSimilarBatchPromptParts,
     generateReanswerPrompt,
     generateReanswerPromptParts,
     generateGeogebraPromptParts,
@@ -153,6 +155,53 @@ describe('AI Prompts', () => {
         it('默认难度应该是 MEDIUM', () => {
             const prompt = generateSimilarQuestionPrompt('zh', originalQuestion, knowledgePoints);
             expect(prompt.toUpperCase()).toContain('MEDIUM');
+        });
+    });
+
+    describe('generateSimilarBatchPrompt', () => {
+        const originalQuestion = '已知 x + y = 5，求 x² + y² 的最小值';
+        const knowledgePoints = ['一元二次方程', '最值问题'];
+        const requests = [
+            { difficulty: 'medium' as const, count: 1 },
+            { difficulty: 'hard' as const, count: 2 },
+        ];
+
+        it('整串版应包含原题、知识点与生成清单', () => {
+            const prompt = generateSimilarBatchPrompt('zh', originalQuestion, knowledgePoints, requests);
+            expect(prompt).toContain(originalQuestion);
+            expect(prompt).toContain('一元二次方程');
+            expect(prompt).toContain('MEDIUM × 1');
+            expect(prompt).toContain('HARD × 2');
+            expect(prompt).toContain('<variant>');
+        });
+
+        it('拆分版 system 静态稳定、user 承载变量', () => {
+            const { systemPrompt, userContext } = generateSimilarBatchPromptParts('zh', originalQuestion, knowledgePoints, requests);
+            expect(systemPrompt).toContain('<variant>');
+            expect(systemPrompt).not.toContain(originalQuestion); // 原题不进 system，保持前缀缓存命中
+            expect(userContext).toContain(originalQuestion);
+            expect(userContext).toContain('MEDIUM × 1');
+            expect(userContext).toContain('HARD × 2');
+        });
+
+        it('同一输入的 system 段应完全一致（缓存友好）', () => {
+            const a = generateSimilarBatchPromptParts('zh', originalQuestion, knowledgePoints, requests);
+            const b = generateSimilarBatchPromptParts('zh', '另一道题', ['别的知识点'], requests);
+            expect(a.systemPrompt).toBe(b.systemPrompt);
+        });
+
+        it('数量为 0 的难度不应出现在生成清单', () => {
+            const { userContext } = generateSimilarBatchPromptParts('zh', originalQuestion, knowledgePoints, [
+                { difficulty: 'easy' as const, count: 0 },
+                { difficulty: 'harder' as const, count: 1 },
+            ]);
+            expect(userContext).not.toContain('EASY × 0');
+            expect(userContext).toContain('HARDER × 1');
+        });
+
+        it('应该包含错因定向提示（mistakeHint）', () => {
+            const { userContext } = generateSimilarBatchPromptParts('zh', originalQuestion, knowledgePoints, requests, undefined, null, '该题错因：概念混淆');
+            expect(userContext).toContain('概念混淆');
         });
     });
 

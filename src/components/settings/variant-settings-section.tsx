@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useLanguage } from "@/contexts/LanguageContext";
 import { apiClient } from "@/lib/api-client";
 import { DIFFICULTY_LEVELS, DIFFICULTY_LABELS, DEFAULT_VARIANT_SETTINGS, serializeVariantSettings } from "@/lib/variant-settings";
-import type { VariantSettings } from "@/lib/variant-settings";
+import type { VariantSettings, VariantProgress } from "@/lib/variant-settings";
 
 const COUNT_OPTIONS = [0, 1, 2, 3, 4, 5];
 
@@ -25,6 +25,7 @@ export function VariantSettingsSection() {
     const [settings, setSettings] = useState<VariantSettings>(DEFAULT_VARIANT_SETTINGS);
     const [baseline, setBaseline] = useState(DEFAULT_VARIANT_SETTINGS);
     const [stats, setStats] = useState<VariantStats | null>(null);
+    const [progress, setProgress] = useState<VariantProgress | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [saved, setSaved] = useState(false);
@@ -33,13 +34,14 @@ export function VariantSettingsSection() {
     /** 拉取配置与进度；statsOnly=true 供轮询使用——只更新统计，不回写 settings，避免覆盖用户正在编辑的表单 */
     const load = (statsOnly = false) =>
         apiClient
-            .get<{ settings?: VariantSettings; stats: VariantStats }>(`/api/variants/settings${statsOnly ? "?statsOnly=1" : ""}`)
+            .get<{ settings?: VariantSettings; stats: VariantStats; progress?: VariantProgress }>(`/api/variants/settings${statsOnly ? "?statsOnly=1" : ""}`)
             .then((d) => {
                 if (!statsOnly && d.settings) {
                     setSettings(d.settings);
                     setBaseline(d.settings);
                 }
                 setStats(d.stats);
+                if (d.progress) setProgress(d.progress);
             })
             .catch(() => {});
 
@@ -47,14 +49,15 @@ export function VariantSettingsSection() {
         load().finally(() => setLoading(false));
     }, []);
 
-    // 后台生成存在缺口（服务端确认开启且未达标）时轮询进度，数字随后台入库实时变化；
-    // 达标或关闭弹窗后停止。
+    // 后台生成存在缺口（服务端确认开启且未达标）或补齐轮次进行中时轮询进度，数字随后台入库实时变化；
+    // 达标/完成或关闭弹窗后停止。
     const hasGap = stats !== null && stats.enabled && stats.variantCount < stats.targetCount;
+    const generating = progress?.active === true;
     useEffect(() => {
-        if (!hasGap) return;
+        if (!hasGap && !generating) return;
         const timer = setInterval(() => load(true), 10000);
         return () => clearInterval(timer);
-    }, [hasGap]);
+    }, [hasGap, generating]);
 
     const save = async () => {
         setSaving(true);
@@ -177,6 +180,14 @@ export function VariantSettingsSection() {
                     {backfilling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <WandSparkles className="mr-2 h-4 w-4" />}
                     {t.settings?.general?.variant?.backfill || "为现有错题补齐"}
                 </Button>
+                {progress?.active && (
+                    <span className="inline-flex items-center gap-1 text-xs text-primary">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        {(t.settings?.general?.variant?.generating || "生成中 {done}/{total} 题")
+                            .replace("{done}", String(progress.done))
+                            .replace("{total}", String(progress.total))}
+                    </span>
+                )}
                 {stats && (
                     <span className="text-xs text-muted-foreground">
                         {(t.settings?.general?.variant?.progress || "已生成 {done} / 目标 {total}")

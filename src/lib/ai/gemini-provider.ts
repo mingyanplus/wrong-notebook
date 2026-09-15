@@ -1,7 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
-import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult, GradeAnswerResult, GradeAnswerInput } from "./types";
-import { generateAnalyzePromptParts, generateSimilarQuestionPromptParts, generateGeogebraPromptParts, generateBackfillPromptParts } from './prompts';
-import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes, parseGradeResponse } from './schema';
+import { AIService, ParsedQuestion, DifficultyLevel, AIConfig, ReanswerQuestionResult, GeogebraAnalysisResult, BackfillMetaResult, GradeAnswerResult, GradeAnswerInput, VariantBatchItem } from "./types";
+import { generateAnalyzePromptParts, generateSimilarQuestionPromptParts, generateSimilarBatchPromptParts, generateGeogebraPromptParts, generateBackfillPromptParts } from './prompts';
+import { generateVariantsViaSingles } from './batch-fallback';
+import { safeParseParsedQuestion, parseBackfillResponse, normalizeLatexEscapes, parseGradeResponse, parseVariantBatchResponse } from './schema';
 import { getAppConfig, getThinkingLevel, type ThinkingTask, type ThinkingLevel } from '../config';
 import { getMathTagsFromDB, getTagsFromDB } from './tag-service';
 import { createLogger } from '../logger';
@@ -306,6 +307,55 @@ export class GeminiProvider implements AIService {
 
         } catch (error) {
             logger.box('❌ Error during question generation', {
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            this.handleError(error);
+            throw error;
+        }
+    }
+
+    /** 批量变式生成：一次请求出多道不同难度变式（自定义单题模板时退化为逐题调用，保持模板生效） */
+    async generateSimilarQuestions(originalQuestion: string, knowledgePoints: string[], requests: Array<{ difficulty: DifficultyLevel; count: number }>, language: 'zh' | 'en' = 'zh', gradeSemester?: string | null, mistakeHint?: string): Promise<VariantBatchItem[]> {
+        const config = getAppConfig();
+        if (config.prompts?.similar) {
+            return generateVariantsViaSingles(this.generateSimilarQuestion.bind(this), originalQuestion, knowledgePoints, requests, language, gradeSemester, mistakeHint);
+        }
+
+        const { systemPrompt, userContext } = generateSimilarBatchPromptParts(language, originalQuestion, knowledgePoints, requests, undefined, gradeSemester, mistakeHint);
+
+        logger.box('🎯 Generate Similar Questions Batch Request', {
+            provider: 'Gemini',
+            endpoint: `${this.baseUrl}/v1beta/models/${this.modelName}:generateContent`,
+            originalQuestion: originalQuestion.substring(0, 100) + '...',
+            knowledgePoints: knowledgePoints.join(', '),
+            requests
+        });
+        logger.box('📝 System Prompt (静态缓存段)', systemPrompt);
+        logger.box('📝 User Context (变量段)', userContext);
+
+        try {
+            const options = this.genContentOptions('similar');
+            const response = await this.retryOperation(() => this.ai.models.generateContent({
+                model: this.modelName,
+                ...options,
+                config: { ...options.config, systemInstruction: systemPrompt || undefined },
+                contents: userContext
+            }));
+
+            const text = response.text || '';
+
+            logger.box('🤖 AI Raw Response', text);
+
+            if (!text) throw new Error("Empty response from AI");
+            const items = parseVariantBatchResponse(text);
+            if (items.length === 0) throw new Error("No valid <variant> blocks parsed from AI response");
+
+            logger.box('✅ Parsed & Validated Result', JSON.stringify(items, null, 2));
+            return items;
+
+        } catch (error) {
+            logger.box('❌ Error during batch question generation', {
                 error: error instanceof Error ? error.message : String(error),
                 stack: error instanceof Error ? error.stack : undefined
             });

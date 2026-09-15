@@ -3,6 +3,7 @@
  * This module provides centralized prompt management
  */
 import { buildErrorCategoryInstruction } from '../error-categories';
+import type { DifficultyLevel } from './types';
 
 /**
  * 将 gradeSemester 字符串转换为年级数字（用于标签过滤）
@@ -238,10 +239,10 @@ const ANALYZE_CONTEXT_TEMPLATE = `【错因分类说明 (ERROR CATEGORY LIST)】
 export const DEFAULT_ANALYZE_TEMPLATE = `${ANALYZE_STATIC_TEMPLATE}\n\n${ANALYZE_CONTEXT_TEMPLATE}`;
 
 /**
- * 变式任务 system 静态段：全局稳定（仅 {{language_instruction}} 按语言二分），置于请求最前以命中前缀缓存。
+ * 变式任务共享段（单题/批量模板共用，改一处两处生效）：
+ * 角色定义与三个输出字段的填写说明。
  */
-const SIMILAR_STATIC_TEMPLATE = `你是一位资深的K12教育题目生成专家，具备跨学科的题目创作能力。你的核心任务是**根据以下原题和知识点，举一反三生成高质量教学题目**，帮助学生巩固知识并拓展解题思路。
-### 角色定义
+const SIMILAR_ROLE_SECTION = `### 角色定义
 1. **学科全能专家**
    - 精通K12阶段所有学科（数学/语文/英语/物理/化学/生物/历史/地理/政治）
    - 熟悉各年级课程标准与知识点分布
@@ -251,7 +252,48 @@ const SIMILAR_STATIC_TEMPLATE = `你是一位资深的K12教育题目生成专�
    - 确保变式题目保持原题核心考点，改变题目表现形式
 3. **学情分析师**
    - 预判学生易错点（认知盲区/概念混淆/计算失误/审题偏差）
-   - 在变式题目中针对性强化易错点训练
+   - 在变式题目中针对性强化易错点训练`;
+
+/** 单题/批量模板共用的三个输出字段说明（批量版内嵌在每个 <variant> 块中） */
+const SIMILAR_FIELD_SPECS = `<question_text>
+在此处填写新生成的题目文本。包含选项（如果是选择题）。
+</question_text>
+
+<answer_text>
+在此处填写新题目的正确答案。
+</answer_text>
+
+<analysis>
+在此处填写新题目的详细解析。
+* 必须使用简体中文。
+* **直接使用标准的 LaTeX 符号**（如 $\\frac{1}{2}$），**不要**进行 JSON 转义。
+</analysis>`;
+
+/** 各难度档指令文本（单题任务取 en，批量清单取 zh；键收紧 DifficultyLevel，加档漏键即编译错误） */
+const DIFFICULTY_INSTRUCTIONS: Record<DifficultyLevel, { en: string; zh: string }> = {
+    easy: {
+        en: "Make the new question EASIER than the original. Use simpler numbers and more direct concepts.",
+        zh: "比原题更简单，使用更简单的数字和更直接的概念",
+    },
+    medium: {
+        en: "Keep the difficulty SIMILAR to the original question.",
+        zh: "难度与原题相当",
+    },
+    hard: {
+        en: "Make the new question HARDER than the original. Combine multiple concepts or use more complex numbers.",
+        zh: "比原题更难，综合多个概念或使用更复杂的数字",
+    },
+    harder: {
+        en: "Make the new question MUCH HARDER (Challenge Level). Require deeper understanding and multi-step reasoning.",
+        zh: "挑战级，需要更深入的理解和多步推理",
+    },
+};
+
+/**
+ * 变式任务 system 静态段：全局稳定（仅 {{language_instruction}} 按语言二分），置于请求最前以命中前缀缓存。
+ */
+const SIMILAR_STATIC_TEMPLATE = `你是一位资深的K12教育题目生成专家，具备跨学科的题目创作能力。你的核心任务是**根据以下原题和知识点，举一反三生成高质量教学题目**，帮助学生巩固知识并拓展解题思路。
+${SIMILAR_ROLE_SECTION}
 ### 执行流程
 1. **接收任务**
 	解析下方【题目信息】中的原题、知识点、难度级别与错因定向提示。
@@ -270,19 +312,7 @@ const SIMILAR_STATIC_TEMPLATE = `你是一位资深的K12教育题目生成专�
 
 请严格按照以下结构输出内容（不要包含任何其他文字）：
 
-<question_text>
-在此处填写新生成的题目文本。包含选项（如果是选择题）。
-</question_text>
-
-<answer_text>
-在此处填写新题目的正确答案。
-</answer_text>
-
-<analysis>
-在此处填写新题目的详细解析。
-* 必须使用简体中文。
-* **直接使用标准的 LaTeX 符号**（如 $\frac{1}{2}$），**不要**进行 JSON 转义。
-</analysis>
+${SIMILAR_FIELD_SPECS}
 
 ###关键格式与内容约束 (CRITICAL RULES) !!!
 1. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。`;
@@ -299,6 +329,116 @@ DIFFICULTY LEVEL: {{difficulty_level}}
 {{grade_instruction}}{{provider_hints}}`;
 
 export const DEFAULT_SIMILAR_TEMPLATE = `${SIMILAR_STATIC_TEMPLATE}\n\n${SIMILAR_CONTEXT_TEMPLATE}`;
+
+/**
+ * 批量变式任务 system 静态段：一次请求按清单生成多道不同难度的变式题。
+ * 解构原题的思考成本只付一次，多道题复用，替代「每题每难度各请求一次」的高耗时路径。
+ */
+const SIMILAR_BATCH_STATIC_TEMPLATE = `你是一位资深的K12教育题目生成专家，具备跨学科的题目创作能力。你的核心任务是**根据以下原题和知识点，举一反三一次性生成多道高质量教学题目**，帮助学生巩固知识并拓展解题思路。
+${SIMILAR_ROLE_SECTION}
+### 执行流程
+1. **接收任务**
+	解析下方【题目信息】中的原题、知识点与【生成清单】（各难度需生成的数量）。
+	{{language_instruction}}
+2. **解构分析（一次）**
+   - 提取核心考点与能力要求，分析题目陷阱与解题路径
+   - **先完整解构原题，再按清单逐道设计变式**，多道题共用本次理解
+3. **质量管控**
+   - 确保每道题：
+     ✓ 覆盖相同核心知识点
+     ✓ 各道变式之间**互不重复**：题干表述、考查角度、数据设置必须有差异
+     ✓ 保持解题逻辑一致性
+     ✓ 答案唯一且可验证
+     ✓ 无知识性错误
+### 输出规范
+你的响应输出**必须严格遵循以下自定义标签格式**，按【生成清单】逐道输出，每道题一个独立的 <variant> 块。**严禁**使用 JSON 或 Markdown 代码块。**严禁**返回 \`\`\`json ... \`\`\`。
+
+请严格按照以下结构输出内容（不要包含任何其他文字）：
+
+<variant>
+<difficulty>此题难度级别（填写生成清单中对应的大写级别，如 MEDIUM）</difficulty>
+${SIMILAR_FIELD_SPECS}
+</variant>
+
+（按生成清单的数量，继续输出下一个 <variant> 块……）
+
+###关键格式与内容约束 (CRITICAL RULES) !!!
+1. **块数精确**：<variant> 块的总数必须与生成清单的数量合计完全一致。
+2. **难度对应**：每块的 <difficulty> 必须与生成清单一致（级别与数量都不能错位）。
+3. **纯文本**：内容作为纯文本处理，**不要转义反斜杠**。`;
+
+/**
+ * 批量变式任务的变量区：原题/知识点/生成清单随每次请求变化，渲染后作为 user 消息。
+ */
+const SIMILAR_BATCH_CONTEXT_TEMPLATE = `【题目信息 (TASK INPUT)】
+原题: "{{original_question}}"
+Knowledge Points: {{knowledge_points}}
+{{mistake_hint}}
+{{grade_instruction}}{{provider_hints}}
+
+【生成清单 (GENERATION LIST)】
+{{batch_request_list}}
+（严格按上述清单的难度与数量，逐道输出 <variant> 块）`;
+
+/** 生成清单行文本，如「HARD × 2（比原题更难…）」，难度文案与单题任务同源（DIFFICULTY_INSTRUCTIONS） */
+function buildBatchRequestList(requests: Array<{ difficulty: DifficultyLevel; count: number }>): string {
+    return requests
+        .filter((r) => r.count > 0)
+        .map((r) => `- ${r.difficulty.toUpperCase()} × ${r.count}（${DIFFICULTY_INSTRUCTIONS[r.difficulty].zh}）`)
+        .join("\n");
+}
+
+/**
+ * 生成批量变式提示词（缓存友好拆分版）：生成清单等变量全部进入 userContext，
+ * systemPrompt 保持全局稳定以命中前缀缓存。
+ * 注意：不支持 customTemplate——自定义单题模板由 Provider 层回退为逐题调用（见 batch-fallback.ts），
+ * 批量路径不渲染用户模板（单题模板缺少 {{batch_request_list}} 等批量变量）。
+ */
+export function generateSimilarBatchPromptParts(
+  language: 'zh' | 'en',
+  originalQuestion: string,
+  knowledgePoints: string[],
+  requests: Array<{ difficulty: DifficultyLevel; count: number }>,
+  options?: PromptOptions,
+  gradeSemester?: string | null,
+  mistakeHint?: string
+): PromptParts {
+  const langInstruction = language === 'zh'
+    ? "IMPORTANT: Provide the output based on the 'Original Question' language. If the original question is in English, the 'questionText' and 'answerText' of each variant MUST be in English, but the 'analysis' MUST be in Simplified Chinese (to help the student understand). If the original is in Chinese, everything MUST be in Simplified Chinese."
+    : "Please ensure all generated questions are in English.";
+
+  const taskVariables = {
+    original_question: originalQuestion.replace(/"/g, '\\"').replace(/\n/g, '\\n'), // Escape for template safety
+    knowledge_points: knowledgePoints.join(", "),
+    batch_request_list: buildBatchRequestList(requests),
+    mistake_hint: mistakeHint || '',
+    grade_instruction: generateGradeInstruction(gradeSemester),
+    provider_hints: options?.providerHints || ''
+  };
+
+  const userContext = replaceVariables(SIMILAR_BATCH_CONTEXT_TEMPLATE, taskVariables).trim();
+  const systemPrompt = replaceVariables(SIMILAR_BATCH_STATIC_TEMPLATE, { language_instruction: langInstruction }).trim();
+
+  return { systemPrompt, userContext };
+}
+
+/**
+ * 生成批量变式提示词（整串版，静态段+变量区渲染拼接，兼容 Azure 整串模式）
+ */
+export function generateSimilarBatchPrompt(
+  language: 'zh' | 'en',
+  originalQuestion: string,
+  knowledgePoints: string[],
+  requests: Array<{ difficulty: DifficultyLevel; count: number }>,
+  options?: PromptOptions,
+  gradeSemester?: string | null,
+  mistakeHint?: string
+): string {
+  const { systemPrompt, userContext } = generateSimilarBatchPromptParts(
+    language, originalQuestion, knowledgePoints, requests, options, gradeSemester, mistakeHint
+  );
+  return `${systemPrompt}\n\n${userContext}`;
+}
 
 /**
  * Helper to replace placeholders in template
@@ -514,12 +654,7 @@ export function generateSimilarQuestionPromptParts(
     ? "IMPORTANT: Provide the output based on the 'Original Question' language. If the original question is in English, the new 'questionText' and 'answerText' MUST be in English, but the 'analysis' MUST be in Simplified Chinese (to help the student understand). If the original is in Chinese, everything MUST be in Simplified Chinese."
     : "Please ensure the generated question is in English.";
 
-  const difficultyInstruction = {
-    'easy': "Make the new question EASIER than the original. Use simpler numbers and more direct concepts.",
-    'medium': "Keep the difficulty SIMILAR to the original question.",
-    'hard': "Make the new question HARDER than the original. Combine multiple concepts or use more complex numbers.",
-    'harder': "Make the new question MUCH HARDER (Challenge Level). Require deeper understanding and multi-step reasoning."
-  }[difficulty];
+  const difficultyInstruction = DIFFICULTY_INSTRUCTIONS[difficulty].en;
 
   const taskVariables = {
     difficulty_level: difficulty.toUpperCase(),

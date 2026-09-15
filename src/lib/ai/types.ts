@@ -1,6 +1,6 @@
 // Re-export the Zod-validated type from schema.ts
-export type { ParsedQuestionFromSchema as ParsedQuestion } from './schema';
-import type { ParsedQuestionFromSchema } from './schema';
+export type { ParsedQuestionFromSchema as ParsedQuestion, VariantBatchItem } from './schema';
+import type { ParsedQuestionFromSchema, VariantBatchItem } from './schema';
 
 // Import and re-export MistakeStatus from the single source of truth
 import type { MistakeStatus } from '../mistake-status';
@@ -53,6 +53,8 @@ export interface GradeAnswerResult {
 export interface AIService {
     analyzeImage(imageBase64: string, mimeType?: string, language?: 'zh' | 'en', grade?: 7 | 8 | 9 | 10 | 11 | 12 | null, subject?: string | null, gradeSemester?: string | null): Promise<ParsedQuestionFromSchema>;
     generateSimilarQuestion(originalQuestion: string, knowledgePoints: string[], language?: 'zh' | 'en', difficulty?: DifficultyLevel, gradeSemester?: string | null, mistakeHint?: string): Promise<ParsedQuestionFromSchema>;
+    /** 批量变式：一次请求按清单生成多道不同难度的变式题（解构思考成本只付一次） */
+    generateSimilarQuestions(originalQuestion: string, knowledgePoints: string[], requests: Array<{ difficulty: DifficultyLevel; count: number }>, language?: 'zh' | 'en', gradeSemester?: string | null, mistakeHint?: string): Promise<VariantBatchItem[]>;
     reanswerQuestion(questionText: string, language?: 'zh' | 'en', subject?: string | null, imageBase64?: string, gradeSemester?: string | null): Promise<ReanswerQuestionResult>;
     analyzeForGeogebra(questionText: string, answerText: string, analysis: string, previousErrors?: string): Promise<GeogebraAnalysisResult>;
     backfillMeta(questionText: string, answerText?: string, analysis?: string, wrongAnswerText?: string, subject?: string | null, tagList?: string): Promise<BackfillMetaResult>;

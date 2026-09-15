@@ -64,3 +64,10 @@ export function serializeVariantSettings(s: VariantSettings): string {
 export function totalVariantCount(s: VariantSettings): number {
     return DIFFICULTY_LEVELS.reduce((sum, level) => sum + (s.perDifficulty[level] ?? 0), 0);
 }
+
+/** 补齐进度（variant-generator 进程内状态，经 settings 接口透出给前端轮询） */
+export interface VariantProgress {
+    active: boolean;
+    total: number; // 本轮计划处理的错题数（含重试轮）
+    done: number; // 已处理完成（含失败）的错题数
+}

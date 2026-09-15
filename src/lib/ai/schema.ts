@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ERROR_CATEGORIES, ErrorCategoryCode, parseErrorCategoryCode, parseSecondaryCategories, parseQuestionTypeCode } from '../error-categories';
-import type { BackfillMetaResult } from './types';
+import type { BackfillMetaResult, DifficultyLevel } from './types';
 
 const CATEGORY_CODES = [...ERROR_CATEGORIES.map((c) => c.code)] as [ErrorCategoryCode, ...ErrorCategoryCode[]];
 // 主错因枚举额外允许 "unknown"（无学生作答时 AI 无法判定）
@@ -69,6 +69,29 @@ export function normalizeLatexEscapes(text: string): string {
 }
 
 /**
+ * 通用 XML 标签提取（取第一个开始标签到最后一个结束标签之间的内容），解析与测试共用。
+ * 特殊兜底：闭合标签丢失且为 analysis 时读到字符串末尾（输出被 max_tokens 截断时，
+ * 最后一个块的 analysis 标签常被截掉；批量多题输出尤甚）。
+ */
+export function extractTag(text: string, tagName: string): string | null {
+    const startTag = `<${tagName}>`;
+    const endTag = `</${tagName}>`;
+    const startIndex = text.indexOf(startTag);
+    if (startIndex === -1) return null;
+
+    const contentStartIndex = startIndex + startTag.length;
+    const endIndex = text.lastIndexOf(endTag);
+
+    if (endIndex === -1 && tagName === "analysis") {
+        return normalizeLatexEscapes(text.substring(contentStartIndex).trim());
+    }
+    if (endIndex === -1 || contentStartIndex >= endIndex) {
+        return null;
+    }
+    return normalizeLatexEscapes(text.substring(contentStartIndex, endIndex).trim());
+}
+
+/**
  * 解析扫图批改的 XML 标签响应（三个 Provider 共享；provider 仅传入各自的 extractTag）。
  * is_correct 仅在明确输出 "true" 时判对（缺标签/胡乱填写一律判错，保守不推进掌握度）。
  */
@@ -106,4 +129,41 @@ export function parseBackfillResponse(
         secondaryErrorCategories: parseSecondaryCategories(extractTag(text, "secondary_error_categories"), errorCategory),
         requiresImage: requiresImageRaw === "true" ? true : requiresImageRaw === "false" ? false : undefined,
     };
+}
+
+/** 批量变式生成结果的单条变式（变式题库/智能组卷共用） */
+export interface VariantBatchItem {
+    difficulty: DifficultyLevel;
+    questionText: string;
+    answerText: string;
+    analysis: string;
+}
+
+/** 难度归一化：接受模板要求的大写 code，宽松兼容小写/中文 */
+const VARIANT_DIFFICULTY_MAP: Record<string, VariantBatchItem['difficulty']> = {
+    EASY: 'easy', MEDIUM: 'medium', HARD: 'hard', HARDER: 'harder',
+    简单: 'easy', 适中: 'medium', 困难: 'hard', 挑战: 'harder',
+};
+
+/**
+ * 解析批量变式的 XML 标签响应。
+ * 每道题一个 <variant> 块，块内含 difficulty/question_text/answer_text/analysis。
+ * 宽松解析：缺标签/难度无法识别/字段为空的块直接丢弃，能解析几道返回几道，
+ * 缺口由调用方（variant-generator 多轮补齐 / 组卷降级原题）兜底。
+ */
+export function parseVariantBatchResponse(text: string): VariantBatchItem[] {
+    // 取 <variant> 块内层（捕获组），analysis 截断兜底读到内层末尾时不会吃进尾标签
+    const blockRe = /<variant>([\s\S]*?)<\/variant>/g;
+    const items: VariantBatchItem[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = blockRe.exec(text)) !== null) {
+        const block = m[1];
+        const difficulty = VARIANT_DIFFICULTY_MAP[(extractTag(block, 'difficulty') ?? '').toUpperCase()] ?? null;
+        const questionText = extractTag(block, 'question_text') ?? '';
+        const answerText = extractTag(block, 'answer_text') ?? '';
+        const analysis = extractTag(block, 'analysis') ?? '';
+        if (!difficulty || !questionText || !answerText || !analysis) continue;
+        items.push({ difficulty, questionText, answerText, analysis });
+    }
+    return items;
 }

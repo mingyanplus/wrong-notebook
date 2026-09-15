@@ -5,6 +5,7 @@ import { getServerSession } from "next-auth";
 import { unauthorized, internalError, badRequest } from "@/lib/api-errors";
 import { createLogger } from "@/lib/logger";
 import { parseVariantSettings, serializeVariantSettings, totalVariantCount } from "@/lib/variant-settings";
+import { getVariantProgress } from "@/lib/variant-generator";
 
 const logger = createLogger('api:variants:settings');
 
@@ -29,7 +30,7 @@ async function loadStats(userId: string) {
     };
 }
 
-/** 获取当前用户变式自动生成配置与题库进度统计（一次请求拿全）；?statsOnly=1 时只返回统计供轮询使用 */
+/** 获取当前用户变式自动生成配置、题库进度统计与补齐进度（一次请求拿全）；?statsOnly=1 时只返回统计供轮询使用 */
 export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session || !session.user) {
@@ -37,8 +38,9 @@ export async function GET(req: Request) {
     }
     try {
         const { settings, stats } = await loadStats(session.user.id);
+        const progress = getVariantProgress(session.user.id);
         const statsOnly = new URL(req.url).searchParams.get("statsOnly") === "1";
-        return NextResponse.json(statsOnly ? { stats } : { settings, stats });
+        return NextResponse.json(statsOnly ? { stats, progress } : { settings, stats, progress });
     } catch (error) {
         logger.error({ error }, 'Error fetching variant settings');
         return internalError("Failed to fetch variant settings");
