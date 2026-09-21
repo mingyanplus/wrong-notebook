@@ -36,6 +36,30 @@ interface VariantItem {
 /** 打印勾选行的难度顺序（常用档在前），展示名走 t.reviewPrint.variantLevels */
 const VARIANT_LEVELS: DifficultyLevel[] = ["medium", "hard", "harder", "easy"];
 
+/** 题干是否依赖原图（几何图/函数图像/示意图）：
+ *  1) 图类关键词（基于 446 道真实题干提取：如图/图中/图像等命中 60 题）；
+ *  2) 几何名词 + 顶点字母同现（兜住「平行四边形 ABCD 中…」这类题干不提图但必须给图的，实测精确命中 2 题零误伤） */
+const IMAGE_HINT_RE = /如图|图所示|图中|图示|图像|图形|示意图|下图|上图|左图|右图|平面图|数轴|坐标/;
+const GEO_SHAPE_RE = /(△|三角形|平行四边形|正方形|长方形|矩形|梯形|菱形|圆)[\s\S]{0,20}?\$?[A-Z]{1,4}\$?/;
+
+function imageNeededFor(questionText: string | null | undefined): boolean {
+    const text = questionText ?? "";
+    return IMAGE_HINT_RE.test(text) || GEO_SHAPE_RE.test(text);
+}
+
+/** 估算文本打印行数（正文列约 40 字/行） */
+function estimateLines(text: string | null | undefined): number {
+    if (!text) return 1;
+    return Math.max(1, Math.ceil(text.replace(/\s+/g, "").length / 40));
+}
+
+/** 作答留白高度随题长自适应：短题小留白，浏览器自然分页可排 3-5 题/页；长题/带图保持充足留白 */
+function answerSpaceClass(lines: number, hasImage: boolean): string {
+    if (!hasImage && lines <= 4) return "h-20";
+    if (lines <= 8) return "h-28";
+    return "h-36";
+}
+
 /**
  * 今日复习卷打印页（纸质复习闭环）：
  * 到期题目按知识点分组打印（题干 + 去红原图 + 作答留白），
@@ -113,10 +137,11 @@ function ReviewPrintContent() {
 
     const handlePrint = async () => {
         if (redFilter && !picking) {
-            // 等待全部原图完成去红（命中缓存则立即返回），避免打印到未处理的原图
+            // 等待将要显示的原图完成去红（命中缓存则立即返回），避免打印到未处理的原图；
+            // 纯文字题不显示原图，也不必处理
             await Promise.all(
                 items
-                    .filter((i) => i.errorItem.originalImageUrl)
+                    .filter((i) => i.errorItem.originalImageUrl && imageNeededFor(i.errorItem.questionText))
                     .map((i) => getRedFilteredImage(i.errorItem.originalImageUrl, redFilterOptions))
             );
         }
@@ -145,6 +170,8 @@ function ReviewPrintContent() {
     // 单题块（分组与平铺两种渲染共用；seq 闭包递增保证全卷连续题号）
     const renderItem = (d: DueItem) => {
         const no = ++seq;
+        const showImage = !!d.errorItem.originalImageUrl && imageNeededFor(d.errorItem.questionText);
+        const questionLines = estimateLines(d.errorItem.questionText);
         return (
             <div key={d.errorItem.id} className="mb-6 print:break-inside-avoid">
                 <div className="flex gap-2">
@@ -153,7 +180,7 @@ function ReviewPrintContent() {
                         <div className="prose prose-sm max-w-none">
                             <MarkdownRenderer content={d.errorItem.questionText || "（无题干）"} />
                         </div>
-                        {d.errorItem.originalImageUrl && (
+                        {showImage && (
                             <MaskedOriginalImage
                                 src={d.errorItem.originalImageUrl}
                                 masks={d.errorItem.imageMasks}
@@ -165,8 +192,8 @@ function ReviewPrintContent() {
                                 style={{ maxWidth: `${imageScale}%` }}
                             />
                         )}
-                        {/* 作答留白 */}
-                        <div className="mt-3 h-36 border-t border-dashed border-gray-300 dark:border-gray-600 print:border-gray-300" />
+                        {/* 作答留白（高度随题长自适应，短题多题同页） */}
+                        <div className={`mt-3 ${answerSpaceClass(questionLines, showImage)} border-t border-dashed border-gray-300 dark:border-gray-600 print:border-gray-300`} />
                         {/* 附加变式题（勾选的难度数量，紧跟源题练同类）；卷面只标序号不标难度，避免孩子做题前受难度暗示 */}
                         {selectedVariantsByItem.get(d.errorItem.id)?.map((v, idx) => (
                             <div key={v.id} className="mt-4 print:break-inside-avoid">
@@ -178,7 +205,7 @@ function ReviewPrintContent() {
                                 <div className="prose prose-sm max-w-none">
                                     <MarkdownRenderer content={v.questionText || "（无题干）"} />
                                 </div>
-                                <div className="mt-3 h-36 border-t border-dashed border-gray-300 dark:border-gray-600 print:border-gray-300" />
+                                <div className={`mt-3 ${answerSpaceClass(estimateLines(v.questionText), false)} border-t border-dashed border-gray-300 dark:border-gray-600 print:border-gray-300`} />
                             </div>
                         ))}
                     </div>
