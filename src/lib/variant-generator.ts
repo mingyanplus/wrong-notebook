@@ -23,8 +23,8 @@ export type { VariantProgress } from "@/lib/variant-settings";
 
 const logger = createLogger('variant-generator');
 
-// 并发上限：2 路并行（原串行为防限流；批量请求已把单题调用次数大幅降低，小并发风险可控）
-const MAX_CONCURRENCY = 2;
+// 并发上限：默认 2 路并行（AI 生成是网络重活，防限流）；可用环境变量 VARIANT_MAX_CONCURRENCY 覆盖（1-8）
+const MAX_CONCURRENCY = Math.min(8, Math.max(1, Number(process.env.VARIANT_MAX_CONCURRENCY) || 2));
 
 // 进程内并发队列：N 个 worker 消费同一等待队列。
 // 注意：只让「单题生成」级别的叶子任务入队，轮次调度（runBackfillRound）直接异步执行，

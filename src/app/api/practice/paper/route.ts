@@ -18,7 +18,7 @@ const logger = createLogger('api:practice:paper');
 const MAX_COUNT = 30;
 const MAX_VARIANT_COUNT = 3;
 const AI_RETRIES = 3; // 定案：单题失败自动重试 3 次
-const CONCURRENCY = 2; // 定案：并发 2 路
+const CONCURRENCY = Math.min(8, Math.max(1, Number(process.env.VARIANT_MAX_CONCURRENCY) || 2)); // 定案默认 2 路，环境变量可调（与变式题库共用）
 
 interface GenerateBody {
     subjectId?: string;

@@ -747,10 +747,10 @@ export function SettingsDialog() {
                                     }}
                                     onBlur={() => {
                                         const currentVal = (config.timeouts?.analyze || 0) / 1000;
-                                        // Valid range 120-600, default 120
+                                        // Valid range 120-1800, default 120（思考模型偶发慢响应，上限放到 30 分钟）
                                         let safeVal = currentVal;
                                         if (safeVal < 120) safeVal = 120;
-                                        if (safeVal > 600) safeVal = 600;
+                                        if (safeVal > 1800) safeVal = 1800;
 
                                         if (safeVal !== currentVal) {
                                             setConfig(prev => ({
@@ -763,7 +763,7 @@ export function SettingsDialog() {
                                         }
                                     }}
                                     min={120}
-                                    max={600}
+                                    max={1800}
                                 />
                                 <p className="text-xs text-muted-foreground">
                                     {t.settings?.general?.timeoutDesc || "Increase this value if you experience frequent timeouts during AI analysis."}
