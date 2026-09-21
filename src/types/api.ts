@@ -84,6 +84,10 @@ export interface ErrorItem {
     masteryLevel: number;
     gradeSemester?: string | null;
     paperLevel?: string | null;
+    /** 关联计数（列表接口按需返回）：variants = 已生成的举一反三变式题数 */
+    _count?: {
+        variants?: number;
+    };
 
     createdAt: string;
     updatedAt: string;

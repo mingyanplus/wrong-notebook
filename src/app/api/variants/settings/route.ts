@@ -15,9 +15,14 @@ async function loadStats(userId: string) {
         select: { variantSettings: true },
     });
     const settings = parseVariantSettings(user?.variantSettings);
-    const [itemCount, variantCount] = await Promise.all([
+    const [itemCount, variantCount, byDifficultyRows] = await Promise.all([
         prisma.errorItem.count({ where: { userId, questionText: { not: null } } }),
         prisma.variantQuestion.count({ where: { errorItem: { userId } } }),
+        prisma.variantQuestion.groupBy({
+            by: ["difficulty"],
+            where: { errorItem: { userId } },
+            _count: { _all: true },
+        }),
     ]);
     return {
         settings,
@@ -26,6 +31,8 @@ async function loadStats(userId: string) {
             variantCount,
             targetCount: itemCount * totalVariantCount(settings),
             enabled: settings.enabled,
+            // 按难度分布（含已停用档位的历史存量，供设置页逐档展示）
+            byDifficulty: Object.fromEntries(byDifficultyRows.map((r) => [r.difficulty, r._count._all])),
         },
     };
 }

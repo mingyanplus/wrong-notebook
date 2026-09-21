@@ -17,6 +17,8 @@ interface VariantStats {
     variantCount: number;
     targetCount: number;
     enabled: boolean;
+    /** 按难度分布（含已停用档位的历史存量），键为难度 code */
+    byDifficulty?: Record<string, number>;
 }
 
 /** 设置弹窗「通用」页内的变式自动生成配置：开关 + 各难度数量 + 存量补齐 */
@@ -189,11 +191,28 @@ export function VariantSettingsSection() {
                     </span>
                 )}
                 {stats && (
-                    <span className="text-xs text-muted-foreground">
-                        {(t.settings?.general?.variant?.progress || "已生成 {done} / 目标 {total}")
-                            .replace("{done}", String(stats.variantCount))
-                            .replace("{total}", String(stats.targetCount))}
-                    </span>
+                    <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                        <span>
+                            {(t.settings?.general?.variant?.progress || "已生成 {done} / 目标 {total}")
+                                .replace("{done}", String(stats.variantCount))
+                                .replace("{total}", String(stats.targetCount))}
+                        </span>
+                        {/* 按难度逐档展示（含已停用档位的历史存量）：开启档位显示 已有/目标，停用档位显示存量 */}
+                        <span>
+                            {DIFFICULTY_LEVELS.filter(
+                                (lv) => (stats.byDifficulty?.[lv] ?? 0) > 0 || (settings.perDifficulty[lv] ?? 0) > 0
+                            )
+                                .map((lv) => {
+                                    const have = stats.byDifficulty?.[lv] ?? 0;
+                                    const perItem = settings.perDifficulty[lv] ?? 0;
+                                    const label = t.reviewPrint?.variantLevels?.[lv] ?? DIFFICULTY_LABELS[lv];
+                                    return perItem > 0
+                                        ? `${label} ${have}/${perItem * stats.itemCount}`
+                                        : `${label} ${have}${t.settings?.general?.variant?.levelOff || "（未启用）"}`;
+                                })
+                                .join(" · ")}
+                        </span>
+                    </div>
                 )}
             </div>
         </div>

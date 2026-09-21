@@ -173,6 +173,8 @@ export async function GET(req: Request) {
             include: {
                 subject: true,
                 tags: true,
+                // 变式题数量（列表卡片「变式 N」徽章用）
+                _count: { select: { variants: true } },
             },
             skip: (page - 1) * pageSize,
             take: pageSize,

@@ -921,6 +921,11 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                                             <Badge variant={item.mistakeStatus === "wrong_attempt" ? "default" : "secondary"} className="text-xs">
                                                 {getMistakeStatusLabel(item.mistakeStatus, language)}
                                             </Badge>
+                                            {(item._count?.variants ?? 0) > 0 && (
+                                                <Badge variant="outline" className="text-xs" title={t.filter?.variantCountBadge || "Variants {n}"}>
+                                                    {(t.filter?.variantCountBadge || "变式 {n}").replace("{n}", String(item._count?.variants))}
+                                                </Badge>
+                                            )}
                                         </div>
                                         <div className="flex flex-wrap gap-2 mt-3">
                                             {(expandedTags.has(item.id) ? tags : tags.slice(0, 3)).map((tag: string) => (
