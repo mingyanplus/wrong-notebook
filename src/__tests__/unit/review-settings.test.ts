@@ -15,13 +15,13 @@ describe('parseReviewSettings', () => {
     it('应接受合法的 dailyLimit', () => {
         expect(parseReviewSettings('{"dailyLimit":20}').dailyLimit).toBe(20);
         expect(parseReviewSettings('{"dailyLimit":1}').dailyLimit).toBe(1);
-        expect(parseReviewSettings('{"dailyLimit":200}').dailyLimit).toBe(200);
+        expect(parseReviewSettings('{"dailyLimit":500}').dailyLimit).toBe(500);
     });
 
     it('应拒绝非法的 dailyLimit（非整数、越界、非数字）', () => {
         expect(parseReviewSettings('{"dailyLimit":0}').dailyLimit).toBeNull();
         expect(parseReviewSettings('{"dailyLimit":-5}').dailyLimit).toBeNull();
-        expect(parseReviewSettings('{"dailyLimit":201}').dailyLimit).toBeNull();
+        expect(parseReviewSettings('{"dailyLimit":501}').dailyLimit).toBeNull();
         expect(parseReviewSettings('{"dailyLimit":10.5}').dailyLimit).toBeNull();
         expect(parseReviewSettings('{"dailyLimit":"20"}').dailyLimit).toBeNull();
     });

@@ -597,7 +597,7 @@ describe('/api/error-items', () => {
             );
         });
 
-        it('应该支持按错因筛选', async () => {
+        it('应该支持按错因筛选（单值兼容，in 单元素等价精确匹配）', async () => {
             mocks.mockPrismaErrorItem.count.mockResolvedValue(0);
             mocks.mockPrismaErrorItem.findMany.mockResolvedValue([]);
 
@@ -608,7 +608,45 @@ describe('/api/error-items', () => {
             expect(mocks.mockPrismaErrorItem.findMany).toHaveBeenCalledWith(
                 expect.objectContaining({
                     where: expect.objectContaining({
-                        errorCategory: 'concept',
+                        errorCategory: { in: ['concept'] },
+                    }),
+                })
+            );
+        });
+
+        it('应该支持错因多选筛选（逗号分隔）', async () => {
+            mocks.mockPrismaErrorItem.count.mockResolvedValue(0);
+            mocks.mockPrismaErrorItem.findMany.mockResolvedValue([]);
+
+            const request = new Request('http://localhost/api/error-items/list?errorCategory=concept,careless');
+            const response = await GET_LIST(request);
+
+            expect(response.status).toBe(200);
+            expect(mocks.mockPrismaErrorItem.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        errorCategory: { in: ['concept', 'careless'] },
+                    }),
+                })
+            );
+        });
+
+        it('多选含 unknown 时应同时匹配未分类与所选错因（OR 条件）', async () => {
+            mocks.mockPrismaErrorItem.count.mockResolvedValue(0);
+            mocks.mockPrismaErrorItem.findMany.mockResolvedValue([]);
+
+            const request = new Request('http://localhost/api/error-items/list?errorCategory=concept,unknown');
+            const response = await GET_LIST(request);
+
+            expect(response.status).toBe(200);
+            expect(mocks.mockPrismaErrorItem.findMany).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    where: expect.objectContaining({
+                        AND: expect.arrayContaining([
+                            expect.objectContaining({
+                                OR: [{ errorCategory: { in: ['concept'] } }, { errorCategory: null }],
+                            }),
+                        ]),
                     }),
                 })
             );

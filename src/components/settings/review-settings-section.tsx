@@ -9,9 +9,10 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { apiClient } from "@/lib/api-client";
 import { ERROR_CATEGORIES } from "@/lib/error-categories";
 import { isSameReviewSettings, DEFAULT_REVIEW_SETTINGS, UNCATEGORIZED_SENTINEL } from "@/lib/review-settings";
+import { MAX_DAILY_LIMIT } from "@/lib/review-settings";
 import type { ReviewSettings } from "@/lib/review-settings";
 
-const LIMIT_OPTIONS: Array<number | null> = [null, 5, 10, 15, 20, 30, 50];
+const LIMIT_OPTIONS: Array<number | null> = [null, 5, 10, 15, 20, 30, 50, 100, 200, MAX_DAILY_LIMIT];
 
 /** 设置弹窗「通用」页内的复习设置：每日数量上限 + 重点错因勾选（作用于到期复习列表） */
 export function ReviewSettingsSection() {

@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth";
 import { unauthorized, internalError } from "@/lib/api-errors";
 import { createLogger } from "@/lib/logger";
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MIN_PAGE_SIZE } from "@/lib/constants/pagination";
+import { buildErrorCategoryWhere } from "@/lib/error-categories";
 
 const logger = createLogger('api:error-items:list');
 
@@ -71,13 +72,15 @@ export async function GET(req: Request) {
             whereClause.masteryLevel = mastery === "1" ? { gte: 2 } : { lt: 2 };
         }
 
-        // 错因筛选（主错因精确匹配；unknown 表示未分类）
-        if (errorCategory && errorCategory !== "all") {
-            if (errorCategory === "unknown") {
-                whereClause.errorCategory = null;
-            } else {
-                whereClause.errorCategory = errorCategory;
-            }
+        // 错因筛选（主错因多选，逗号分隔；unknown 表示未分类，与具体错因为 OR 关系）
+        const errorCategories = errorCategory && errorCategory !== "all"
+            ? errorCategory.split(",").map((c) => c.trim()).filter(Boolean)
+            : [];
+        if (errorCategories.length > 0) {
+            // OR 形态走 andConditions（顶层 OR 会与下方 grade 筛选的 Object.assign OR 互相覆盖）
+            const catFilter = buildErrorCategoryWhere(errorCategories, "unknown");
+            if ("OR" in catFilter) andConditions.push(catFilter);
+            else if ("errorCategory" in catFilter) whereClause.errorCategory = catFilter.errorCategory;
         }
 
         // 来源试卷筛选（包含匹配，便于按“期中”匹配“期中试卷”）

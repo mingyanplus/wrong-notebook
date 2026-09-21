@@ -15,10 +15,19 @@ export interface ReviewSettings {
 export const DEFAULT_REVIEW_SETTINGS: ReviewSettings = { dailyLimit: null, errorCategories: null };
 
 /** 每日复习数量上限（校验与接口兜底共用同一约束，避免两处硬编码漂移） */
-export const MAX_DAILY_LIMIT = 200;
+export const MAX_DAILY_LIMIT = 500;
 
 /** 勾选「未分类」时的哨兵值：复习错因筛选同时包含没有错因的题（如做不来但当时没录错因） */
 export const UNCATEGORIZED_SENTINEL = "uncategorized";
+
+/** 到期复习列表排序模式（前后端共享单一来源，避免字面量多处漂移）：asc 掌握度低+到期早优先（默认）；desc 反向；random 确定性乱序；tag 前端按知识点分组 */
+export const DUE_SORT_MODES = ["asc", "desc", "random", "tag"] as const;
+export type DueSortMode = (typeof DUE_SORT_MODES)[number];
+
+/** 解析到期列表排序参数：非法值一律回退默认 asc */
+export function parseDueSortMode(raw: string | null): DueSortMode {
+    return raw === "desc" || raw === "random" || raw === "tag" ? raw : "asc";
+}
 
 const validCodes = new Set<string>([...ERROR_CATEGORIES.map((c) => c.code as string), UNCATEGORIZED_SENTINEL]);
 

@@ -15,6 +15,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { useRouter } from "next/navigation";
 import {
     DropdownMenu,
+    DropdownMenuCheckboxItem,
     DropdownMenuContent,
     DropdownMenuItem,
     DropdownMenuLabel,
@@ -23,13 +24,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { KnowledgeFilter } from "@/components/knowledge-filter";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ERROR_CATEGORIES } from "@/lib/error-categories";
-import { ErrorItem, PaginatedResponse } from "@/types/api";
+import { ERROR_CATEGORIES, getErrorCategory } from "@/lib/error-categories";
+import { ErrorItem, PaginatedResponse, DueReviewItem } from "@/types/api";
 import { apiClient } from "@/lib/api-client";
 import { cleanMarkdown } from "@/lib/markdown-utils";
 import { Pagination } from "@/components/ui/pagination";
 import { DEFAULT_PAGE_SIZE } from "@/lib/constants/pagination";
 import { getMistakeStatusLabel } from "@/lib/mistake-status";
+import { DUE_SORT_MODES, type DueSortMode } from "@/lib/review-settings";
 
 interface ErrorListProps {
     subjectId?: string;
@@ -52,10 +54,11 @@ interface ErrorListPrefs {
     gradeFilter: string;
     chapterFilter: string;
     paperLevelFilter: "all" | "a" | "b" | "other";
-    errorCategoryFilter: string;
+    errorCategoryFilters: string[];
     sourceFilter: string;
     selectedTag: string | null;
     sortOrder: SortOrder;
+    dueSortOrder: DueSortMode;
     page: number;
 }
 
@@ -66,10 +69,11 @@ const DEFAULT_PREFS: ErrorListPrefs = {
     gradeFilter: "",
     chapterFilter: "",
     paperLevelFilter: "all",
-    errorCategoryFilter: "all",
+    errorCategoryFilters: [],
     sourceFilter: "all",
     selectedTag: null,
     sortOrder: "desc",
+    dueSortOrder: "asc",
     page: 1,
 };
 
@@ -79,6 +83,7 @@ const PREF_ENUMS = {
     timeFilter: ["all", "week", "month"],
     paperLevelFilter: ["all", "a", "b", "other"],
     sortOrder: ["desc", "asc"],
+    dueSortOrder: DUE_SORT_MODES,
 } as const;
 
 function getPrefsKey(subjectId?: string): string {
@@ -90,7 +95,9 @@ function readPrefs(subjectId?: string): ErrorListPrefs {
     try {
         const raw = window.localStorage.getItem(getPrefsKey(subjectId));
         if (!raw) return DEFAULT_PREFS;
-        const p = { ...DEFAULT_PREFS, ...JSON.parse(raw) } as ErrorListPrefs;
+        // 旧版单选字段 errorCategoryFilter（"all"|"code"）一并带出，供下方迁移
+        const parsed = JSON.parse(raw) as Partial<ErrorListPrefs> & { errorCategoryFilter?: unknown };
+        const p = { ...DEFAULT_PREFS, ...parsed } as ErrorListPrefs;
         // 逐字段兜底：写入方是本组件自身，脏数据只可能来自旧版本残留
         for (const key of Object.keys(PREF_ENUMS) as (keyof typeof PREF_ENUMS)[]) {
             if (!(PREF_ENUMS[key] as readonly string[]).includes(p[key])) {
@@ -101,8 +108,14 @@ function readPrefs(subjectId?: string): ErrorListPrefs {
         for (const key of ["search", "gradeFilter", "chapterFilter"] as const) {
             if (typeof p[key] !== "string") p[key] = "";
         }
-        for (const key of ["errorCategoryFilter", "sourceFilter"] as const) {
-            if (typeof p[key] !== "string") p[key] = "all";
+        if (typeof p.sourceFilter !== "string") p.sourceFilter = "all";
+        // 错因多选：非法值过滤；旧版单选值迁移（非 "all" 的旧选择保留为单元素数组）
+        const validCats = new Set<string>([...ERROR_CATEGORIES.map((c) => c.code as string), "unknown"]);
+        if (!Array.isArray(p.errorCategoryFilters)) {
+            const legacy = parsed.errorCategoryFilter;
+            p.errorCategoryFilters = typeof legacy === "string" && validCats.has(legacy) ? [legacy] : [];
+        } else {
+            p.errorCategoryFilters = p.errorCategoryFilters.filter((c) => validCats.has(c));
         }
         if (typeof p.selectedTag !== "string") p.selectedTag = null;
         if (!Number.isInteger(p.page) || p.page < 1) p.page = 1;
@@ -115,7 +128,7 @@ function readPrefs(subjectId?: string): ErrorListPrefs {
 /** 筛选键 = 除 page 外的全部偏好字段（page 变化不算筛选变化，不触发页码重置） */
 const FILTER_KEYS: (keyof Omit<ErrorListPrefs, "page">)[] = [
     "search", "masteryFilter", "timeFilter", "selectedTag", "gradeFilter",
-    "chapterFilter", "paperLevelFilter", "errorCategoryFilter", "sourceFilter", "sortOrder",
+    "chapterFilter", "paperLevelFilter", "errorCategoryFilters", "sourceFilter", "sortOrder",
 ];
 
 export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
@@ -126,13 +139,13 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const updatePrefs = (patch: Partial<ErrorListPrefs>) => setPrefs((p) => ({ ...p, ...patch }));
     const {
         search, masteryFilter, timeFilter, gradeFilter, chapterFilter,
-        paperLevelFilter, errorCategoryFilter, sourceFilter, selectedTag, sortOrder, page,
+        paperLevelFilter, errorCategoryFilters, sourceFilter, selectedTag, sortOrder, dueSortOrder, page,
     } = prefs;
     const [isBackfilling, setIsBackfilling] = useState(false);
     const [availableSources, setAvailableSources] = useState<string[]>([]);
     const [expandedTags, setExpandedTags] = useState<Set<string>>(new Set());
     // 到期待复习（艾宾浩斯计划）；knowledgeTags 供按知识点分组现做（用户流程：按知识点×错因过重点题）
-    const [dueReviews, setDueReviews] = useState<Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null; knowledgeTags?: string[] } }>>([]);
+    const [dueReviews, setDueReviews] = useState<DueReviewItem[]>([]);
     const [showDueList, setShowDueList] = useState(false);
     // 分页状态（pageSize/total/totalPages 非偏好，page 在 prefs 内持久化）
     const [pageSize] = useState(DEFAULT_PAGE_SIZE);
@@ -145,15 +158,23 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const { t, language } = useLanguage();
     const router = useRouter();
 
-    // 拉取到期待复习数量（艾宾浩斯计划）
+    // 拉取到期待复习数量（艾宾浩斯计划）；排序模式随偏好走（后端确定性乱序）
     useEffect(() => {
         let cancelled = false;
-        const query = subjectId ? `?subjectId=${subjectId}` : "";
-        apiClient.get<{ count: number; items: Array<{ overdueDays: number; errorItem: { id: string; questionText: string | null; knowledgeTags?: string[] } }> }>(`/api/review/due${query}`)
+        apiClient.get<{ count: number; items: DueReviewItem[] }>(
+            "/api/review/due",
+            { params: { ...(subjectId ? { subjectId } : {}), sort: dueSortOrder } }
+        )
             .then((data) => {
                 if (!cancelled) setDueReviews(data.items || []);
             })
             .catch(() => { /* 静默失败，不影响主列表 */ });
+        return () => { cancelled = true; };
+    }, [subjectId, dueSortOrder]);
+
+    // 来源列表与排序/筛选无关，仅随错题本变化拉取一次
+    useEffect(() => {
+        let cancelled = false;
         apiClient.get<string[]>("/api/error-items/sources")
             .then((data) => {
                 if (!cancelled) setAvailableSources(data || []);
@@ -171,6 +192,10 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
     const lastSubjectIdRef = useRef(subjectId);
     const skipFetchRef = useRef(false);
     const skipSaveRef = useRef(false);
+    // 切本恢复完成后的那一轮强制拉取（恢复值与 prevRef 相同，会被下方"无实质变化"判断拦住）
+    const forceFetchRef = useRef(false);
+    // 是否已拉取过（首挂载必须拉取；prevRef 初始与当前值相等，不能靠它区分首轮）
+    const didFetchRef = useRef(false);
     useEffect(() => {
         if (lastSubjectIdRef.current === subjectId) return;
         lastSubjectIdRef.current = subjectId;
@@ -179,6 +204,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         prevRef.current = { subjectId, prefs: next };
         skipFetchRef.current = true;
         skipSaveRef.current = true;
+        forceFetchRef.current = true;
     }, [subjectId]);
 
     const handleExportPrint = () => {
@@ -197,7 +223,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         if (gradeFilter) params.append("gradeSemester", gradeFilter);
         if (chapterFilter) params.append("chapter", chapterFilter); // 章节筛选
         if (paperLevelFilter !== "all") params.append("paperLevel", paperLevelFilter);
-        if (errorCategoryFilter !== "all") params.append("errorCategory", errorCategoryFilter);
+        if (errorCategoryFilters.length > 0) params.append("errorCategory", errorCategoryFilters.join(","));
         if (sourceFilter !== "all") params.append("source", sourceFilter);
 
         router.push(`/print-preview?${params.toString()}`);
@@ -300,9 +326,18 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         const filtersChanged =
             prev.subjectId !== subjectId ||
             FILTER_KEYS.some((k) => prev.prefs[k] !== prefs[k]);
+        const pageChanged = prev.prefs.page !== prefs.page;
 
         // 更新 ref
         prevRef.current = { subjectId, prefs };
+
+        if (forceFetchRef.current) {
+            forceFetchRef.current = false;
+        } else if (didFetchRef.current && !filtersChanged && !pageChanged) {
+            // 仅到期排序等不影响主列表查询的偏好变化：不重拉
+            return;
+        }
+        didFetchRef.current = true;
 
         if (filtersChanged && prefs.page !== 1) {
             // 筛选条件变化且不在第一页，重置到第一页（会再次触发此 effect）
@@ -344,7 +379,7 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
             if (gradeFilter) params.append("gradeSemester", gradeFilter);
             if (chapterFilter) params.append("chapter", chapterFilter); // 章节筛选
             if (paperLevelFilter !== "all") params.append("paperLevel", paperLevelFilter);
-            if (errorCategoryFilter !== "all") params.append("errorCategory", errorCategoryFilter);
+            if (errorCategoryFilters.length > 0) params.append("errorCategory", errorCategoryFilters.join(","));
             if (sourceFilter !== "all") params.append("source", sourceFilter);
             // 排序：最新在前 / 最早在前
             params.append("sortOrder", sortOrder);
@@ -363,13 +398,15 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         }
     };
 
-    // 到期题按知识点分组（取首个标签，无标签归「未分类」）——支撑「按知识点逐块现做」的复习流程
+    // 到期题按知识点分组（仅「知识点」排序模式；取首个标签，无标签归「未分类」）——支撑「按知识点逐块现做」的复习流程
     const dueGroups = useMemo(
         () =>
-            Array.from(
-                groupByFirstTag(dueReviews, (d) => d.errorItem.knowledgeTags, t.filter.dueUngrouped || "未分类").entries()
-            ),
-        [dueReviews, t.filter.dueUngrouped]
+            dueSortOrder === "tag"
+                ? Array.from(
+                      groupByFirstTag(dueReviews, (d) => d.errorItem.knowledgeTags, t.filter.dueUngrouped || "未分类").entries()
+                  )
+                : [],
+        [dueReviews, dueSortOrder, t.filter.dueUngrouped]
     );
 
     // 单题忙碌集合（录入中/批改中统一互斥）
@@ -420,6 +457,68 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         }
     };
 
+    // 到期条目行（「知识点」分组与平铺两种渲染共用）
+    const renderDueRow = (d: DueReviewItem) => (
+        <div
+            key={d.errorItem.id}
+            className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-amber-100/60 dark:hover:bg-amber-900/40"
+        >
+            <Link
+                href={`/error-items/${d.errorItem.id}`}
+                className="flex-1 truncate text-amber-900 dark:text-amber-200"
+            >
+                {cleanMarkdown(d.errorItem.questionText || "").slice(0, 60) || "（无题干）"}
+            </Link>
+            {d.overdueDays > 0 && (
+                <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">
+                    {(t.filter.dueOverdueDays || "overdue {days}d").replace("{days}", String(d.overdueDays))}
+                </span>
+            )}
+            <span className="flex shrink-0 items-center gap-1">
+                <button
+                    type="button"
+                    disabled={busy.has(d.errorItem.id)}
+                    onClick={() => startPhotoGrading(d.errorItem.id)}
+                    title={t.filter?.gradePhoto || "拍照批改：AI 对照参考答案点评"}
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-amber-600/70 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-40 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                >
+                    {busy.has(d.errorItem.id) ? (
+                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
+                    ) : (
+                        <Camera className="h-3 w-3" />
+                    )}
+                </button>
+                <button
+                    type="button"
+                    disabled={busy.has(d.errorItem.id)}
+                    onClick={() => startManualGrading(d.errorItem.id)}
+                    title={t.filter?.manualGrade || "手动输入答案批改：识别不佳时的兜底"}
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-amber-600/70 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-40 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                >
+                    <PenLine className="h-3 w-3" />
+                </button>
+                <button
+                    type="button"
+                    disabled={busy.has(d.errorItem.id)}
+                    onClick={() => recordReview(d.errorItem.id, true)}
+                    title={t.filter?.recordCorrect || "做对，推进复习计划"}
+                    className="rounded-full border border-green-600/70 px-2 py-0.5 text-xs text-green-700 transition-colors hover:bg-green-50 disabled:opacity-40 dark:border-green-700 dark:text-green-400 dark:hover:bg-green-950/40"
+                >
+                    ✓
+                </button>
+                <button
+                    type="button"
+                    disabled={busy.has(d.errorItem.id)}
+                    onClick={() => recordReview(d.errorItem.id, false)}
+                    title={t.filter?.recordWrong || "做错，重置掌握度并重新安排复习"}
+                    className="rounded-full border border-red-600/70 px-2 py-0.5 text-xs text-red-700 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
+                >
+                    ✗
+                </button>
+            </span>
+        </div>
+    );
+
     // 拍照批改：读图压缩（复用全站上传链路的压缩）→ AI 批改
     const handleGradeFile = (file: File) => {
         const errorItemId = gradingTargetRef.current;
@@ -442,6 +541,30 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
         gradingTargetRef.current = errorItemId;
         fileInputRef.current?.click();
     };
+
+    // 错因多选切换（再次点击取消勾选）
+    const toggleErrorCategory = (code: string) =>
+        updatePrefs({
+            errorCategoryFilters: errorCategoryFilters.includes(code)
+                ? errorCategoryFilters.filter((c) => c !== code)
+                : [...errorCategoryFilters, code],
+        });
+    // 到期排序四档文案（查表，避免嵌套三元）
+    const dueSortLabels: Record<DueSortMode, string> = {
+        asc: t.filter?.dueSortAsc || "Sequential",
+        desc: t.filter?.dueSortDesc || "Reversed",
+        random: t.filter?.dueSortRandom || "Shuffled",
+        tag: t.filter?.dueSortTag || "By Topic",
+    };
+    // 错因筛选触发按钮文案：0 项=全部 / 1 项=该项标签 / 多项=计数
+    const errorCategoryLabel =
+        errorCategoryFilters.length === 0
+            ? t.filter.errorCategory || "全部错因"
+            : errorCategoryFilters.length === 1
+                ? errorCategoryFilters[0] === "unknown"
+                    ? t.filter.errorCategoryUnknown || "未分类"
+                    : getErrorCategory(errorCategoryFilters[0])?.label ?? errorCategoryFilters[0]
+                : (t.filter?.errorCategorySelected || "已选 {n} 项").replace("{n}", String(errorCategoryFilters.length));
 
     return (
         <div className="space-y-6">
@@ -473,9 +596,13 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                         <button
                             type="button"
                             className="mr-2 flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-white dark:border-amber-800 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-900/40"
-                            onClick={() =>
-                                router.push(`/review/print${subjectId ? `?subjectId=${subjectId}` : ""}`)
-                            }
+                            onClick={() => {
+                                // 打印卷跟随到期排序偏好（选乱序则卷面同序；打印页透传 sort 给 /api/review/due）
+                                const params = new URLSearchParams();
+                                if (subjectId) params.set("subjectId", subjectId);
+                                params.set("sort", dueSortOrder);
+                                router.push(`/review/print?${params.toString()}`);
+                            }}
                         >
                             <Printer className="h-3.5 w-3.5" />
                             {t.filter?.printDue || "打印复习卷"}
@@ -493,73 +620,36 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                     </div>
                     {showDueList && (
                         <div className="divide-y divide-amber-100 border-t border-amber-200 dark:divide-amber-900 dark:border-amber-900">
-                            {dueGroups.map(([tag, items]) => (
-                                <div key={tag}>
-                                    <div className="bg-amber-100/60 px-4 py-1.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
-                                        {tag} · {items.length}
-                                    </div>
-                                    {items.map((d) => (
-                                        <div
-                                            key={d.errorItem.id}
-                                            className="flex items-center gap-2 px-4 py-2 text-sm hover:bg-amber-100/60 dark:hover:bg-amber-900/40"
+                            {/* 排序切换：随浏览偏好持久化（下次进入保持上次选择） */}
+                            <div className="flex items-center gap-2 px-4 py-2 text-xs">
+                                <span className="text-amber-800 dark:text-amber-300">{t.filter?.dueSortLabel || "Order"}</span>
+                                <span className="flex items-center gap-1">
+                                    {DUE_SORT_MODES.map((mode) => (
+                                        <button
+                                            key={mode}
+                                            type="button"
+                                            onClick={() => updatePrefs({ dueSortOrder: mode })}
+                                            className={`rounded-md px-2 py-1 ${
+                                                dueSortOrder === mode
+                                                    ? "bg-amber-200 font-medium text-amber-900 dark:bg-amber-800 dark:text-amber-100"
+                                                    : "text-amber-700 transition-colors hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/40"
+                                            }`}
                                         >
-                                            <Link
-                                                href={`/error-items/${d.errorItem.id}`}
-                                                className="flex-1 truncate text-amber-900 dark:text-amber-200"
-                                            >
-                                                {cleanMarkdown(d.errorItem.questionText || "").slice(0, 60) || "（无题干）"}
-                                            </Link>
-                                            {d.overdueDays > 0 && (
-                                                <span className="shrink-0 text-xs text-amber-700 dark:text-amber-300">
-                                                    {(t.filter.dueOverdueDays || "overdue {days}d").replace("{days}", String(d.overdueDays))}
-                                                </span>
-                                            )}
-                                            <span className="flex shrink-0 items-center gap-1">
-                                                <button
-                                                    type="button"
-                                                    disabled={busy.has(d.errorItem.id)}
-                                                    onClick={() => startPhotoGrading(d.errorItem.id)}
-                                                    title={t.filter?.gradePhoto || "拍照批改：AI 对照参考答案点评"}
-                                                    className="flex h-6 w-6 items-center justify-center rounded-full border border-amber-600/70 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-40 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                                                >
-                                                    {busy.has(d.errorItem.id) ? (
-                                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
-                                                    ) : (
-                                                        <Camera className="h-3 w-3" />
-                                                    )}
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    disabled={busy.has(d.errorItem.id)}
-                                                    onClick={() => startManualGrading(d.errorItem.id)}
-                                                    title={t.filter?.manualGrade || "手动输入答案批改：识别不佳时的兜底"}
-                                                    className="flex h-6 w-6 items-center justify-center rounded-full border border-amber-600/70 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-40 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/40"
-                                                >
-                                                    <PenLine className="h-3 w-3" />
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    disabled={busy.has(d.errorItem.id)}
-                                                    onClick={() => recordReview(d.errorItem.id, true)}
-                                                    title={t.filter?.recordCorrect || "做对，推进复习计划"}
-                                                    className="rounded-full border border-green-600/70 px-2 py-0.5 text-xs text-green-700 transition-colors hover:bg-green-50 disabled:opacity-40 dark:border-green-700 dark:text-green-400 dark:hover:bg-green-950/40"
-                                                >
-                                                    ✓
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    disabled={busy.has(d.errorItem.id)}
-                                                    onClick={() => recordReview(d.errorItem.id, false)}
-                                                    title={t.filter?.recordWrong || "做错，重置掌握度并重新安排复习"}
-                                                    className="rounded-full border border-red-600/70 px-2 py-0.5 text-xs text-red-700 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
-                                                >
-                                                    ✗
-                                                </button>
-                                            </span>
-                                        </div>
+                                            {dueSortLabels[mode]}
+                                        </button>
                                     ))}
-                                </div>
-                            ))}
+                                </span>
+                            </div>
+                            {dueSortOrder === "tag"
+                                ? dueGroups.map(([tag, groupItems]) => (
+                                      <div key={tag}>
+                                          <div className="bg-amber-100/60 px-4 py-1.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                                              {tag} · {groupItems.length}
+                                          </div>
+                                          {groupItems.map(renderDueRow)}
+                                      </div>
+                                  ))
+                                : dueReviews.map(renderDueRow)}
                         </div>
                     )}
                 </div>
@@ -679,21 +769,38 @@ export function ErrorList({ subjectId, subjectName }: ErrorListProps = {}) {
                     >
                         {t.editor.paperLevels?.other || "Other"}
                     </Button>
-                    <Select
-                        value={errorCategoryFilter}
-                        onValueChange={(val) => updatePrefs({ errorCategoryFilter: val })}
-                    >
-                        <SelectTrigger className="h-8 w-[140px]">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">{t.filter.errorCategory || "全部错因"}</SelectItem>
-                            <SelectItem value="unknown">{t.filter.errorCategoryUnknown || "未分类"}</SelectItem>
+                    {/* 错因多选：复选框项点击不关闭菜单，可连续勾选对比多类错因 */}
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-8 max-w-[180px]">
+                                <span className="truncate">{errorCategoryLabel}</span>
+                                <ChevronDown className="ml-1 h-3.5 w-3.5 shrink-0" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-44">
+                            <DropdownMenuItem onClick={() => updatePrefs({ errorCategoryFilters: [] })}>
+                                {errorCategoryFilters.length === 0 && "✓ "}{t.filter.errorCategory || "全部错因"}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuCheckboxItem
+                                checked={errorCategoryFilters.includes("unknown")}
+                                onCheckedChange={() => toggleErrorCategory("unknown")}
+                                onSelect={(e) => e.preventDefault()}
+                            >
+                                {t.filter.errorCategoryUnknown || "未分类"}
+                            </DropdownMenuCheckboxItem>
                             {ERROR_CATEGORIES.map((c) => (
-                                <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
+                                <DropdownMenuCheckboxItem
+                                    key={c.code}
+                                    checked={errorCategoryFilters.includes(c.code)}
+                                    onCheckedChange={() => toggleErrorCategory(c.code)}
+                                    onSelect={(e) => e.preventDefault()}
+                                >
+                                    {c.label}
+                                </DropdownMenuCheckboxItem>
                             ))}
-                        </SelectContent>
-                    </Select>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                     <Button
                         variant="outline"
                         size="sm"

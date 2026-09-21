@@ -11,18 +11,16 @@ import { apiClient } from "@/lib/api-client";
 import { RedFilteredImage, getRedFilteredImage, useInkCalibration, InkCalibrationControls, MaskedOriginalImage } from "@/components/red-filtered-image";
 import { groupByFirstTag } from "@/lib/knowledge-tags";
 import { DIFFICULTY_LABELS } from "@/lib/variant-settings";
+import { parseDueSortMode } from "@/lib/review-settings";
+import type { DueReviewItem } from "@/types/api";
 import type { ImageMask } from "@/lib/image-masks";
 import type { DifficultyLevel } from "@/lib/ai/types";
 
-interface DueItem {
-    scheduleId: string;
-    overdueDays: number;
-    errorItem: {
-        id: string;
-        questionText: string | null;
+/** /api/review/due?include=image 的完整返回形状（图片字段为打印专用） */
+interface DueItem extends DueReviewItem {
+    errorItem: DueReviewItem["errorItem"] & {
         originalImageUrl: string;
         imageMasks: ImageMask[];
-        knowledgeTags?: string[];
     };
 }
 
@@ -101,11 +99,16 @@ function ReviewPrintContent() {
         return map;
     }, [variants, variantCounts]);
 
-    // 按知识点分组（首个标签，无标签归「未分类」），与错题本横幅口径一致（共享 groupByFirstTag）
+    // 卷面排序：知识点模式按知识点分组，随机/顺序/倒序平铺（数据顺序由 /api/review/due?sort= 决定）
+    const sortMode = parseDueSortMode(searchParams.get("sort"));
+
+    // 按知识点分组（首个标签，无标签归「未分类」），与错题本横幅口径一致（共享 groupByFirstTag）；仅知识点模式使用
     const groups = useMemo(
         () =>
-            Array.from(groupByFirstTag(items, (d) => d.errorItem.knowledgeTags, t.filter?.dueUngrouped || "未分类").entries()),
-        [items, t.filter?.dueUngrouped]
+            sortMode === "tag"
+                ? Array.from(groupByFirstTag(items, (d) => d.errorItem.knowledgeTags, t.filter?.dueUngrouped || "未分类").entries())
+                : [],
+        [items, sortMode, t.filter?.dueUngrouped]
     );
 
     const handlePrint = async () => {
@@ -138,6 +141,51 @@ function ReviewPrintContent() {
     }
 
     let seq = 0; // 全卷连续题号
+
+    // 单题块（分组与平铺两种渲染共用；seq 闭包递增保证全卷连续题号）
+    const renderItem = (d: DueItem) => {
+        const no = ++seq;
+        return (
+            <div key={d.errorItem.id} className="mb-6 print:break-inside-avoid">
+                <div className="flex gap-2">
+                    <span className="shrink-0 text-sm font-medium pt-0.5">{no}.</span>
+                    <div className="flex-1 min-w-0">
+                        <div className="prose prose-sm max-w-none">
+                            <MarkdownRenderer content={d.errorItem.questionText || "（无题干）"} />
+                        </div>
+                        {d.errorItem.originalImageUrl && (
+                            <MaskedOriginalImage
+                                src={d.errorItem.originalImageUrl}
+                                masks={d.errorItem.imageMasks}
+                                redFilterEnabled={redFilter}
+                                options={redFilterOptions}
+                                picking={picking}
+                                onPick={pickFrom}
+                                className="mt-2"
+                                style={{ maxWidth: `${imageScale}%` }}
+                            />
+                        )}
+                        {/* 作答留白 */}
+                        <div className="mt-3 h-36 border-t border-dashed border-gray-300 dark:border-gray-600 print:border-gray-300" />
+                        {/* 附加变式题（勾选的难度数量，紧跟源题练同类）；卷面只标序号不标难度，避免孩子做题前受难度暗示 */}
+                        {selectedVariantsByItem.get(d.errorItem.id)?.map((v, idx) => (
+                            <div key={v.id} className="mt-4 print:break-inside-avoid">
+                                <div className="mb-1">
+                                    <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
+                                        {(t.reviewPrint?.variantLabel || "变式{n}").replace("{n}", String(idx + 1))}
+                                    </span>
+                                </div>
+                                <div className="prose prose-sm max-w-none">
+                                    <MarkdownRenderer content={v.questionText || "（无题干）"} />
+                                </div>
+                                <div className="mt-3 h-36 border-t border-dashed border-gray-300 dark:border-gray-600 print:border-gray-300" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    };
 
     return (
         <>
@@ -228,64 +276,22 @@ function ReviewPrintContent() {
                     </p>
                 </div>
 
-                {groups.map(([tag, groupItems]) => (
-                    <div key={tag} className="mb-6">
-                        <h3 className="font-bold text-base mb-3 border-b pb-2 print:break-after-avoid">
-                            {tag}（{groupItems.length} {t.filter?.dueItems || "题"}）
-                        </h3>
-                        {groupItems.map((d) => {
-                            const no = ++seq;
-                            return (
-                                <div key={d.errorItem.id} className="mb-6 print:break-inside-avoid">
-                                    <div className="flex gap-2">
-                                        <span className="shrink-0 text-sm font-medium pt-0.5">{no}.</span>
-                                        <div className="flex-1 min-w-0">
-                                            <div className="prose prose-sm max-w-none">
-                                                <MarkdownRenderer content={d.errorItem.questionText || "（无题干）"} />
-                                            </div>
-                                            {d.errorItem.originalImageUrl && (
-                                                <MaskedOriginalImage
-                                                    src={d.errorItem.originalImageUrl}
-                                                    masks={d.errorItem.imageMasks}
-                                                    redFilterEnabled={redFilter}
-                                                    options={redFilterOptions}
-                                                    picking={picking}
-                                                    onPick={pickFrom}
-                                                    className="mt-2"
-                                                    style={{ maxWidth: `${imageScale}%` }}
-                                                />
-                                            )}
-                                            {/* 作答留白 */}
-                                            <div className="mt-3 h-36 border-t border-dashed border-gray-300 dark:border-gray-600 print:border-gray-300" />
-                                            {/* 附加变式题（勾选的难度数量，紧跟源题练同类） */}
-                                            {selectedVariantsByItem.get(d.errorItem.id)?.map((v) => (
-                                                <div key={v.id} className="mt-4 print:break-inside-avoid">
-                                                    <div className="mb-1">
-                                                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
-                                                            {(t.reviewPrint?.variantTag || "变式")} ·{" "}
-                                                            {t.reviewPrint?.variantLevels?.[v.difficulty] ?? DIFFICULTY_LABELS[v.difficulty]}
-                                                        </span>
-                                                    </div>
-                                                    <div className="prose prose-sm max-w-none">
-                                                        <MarkdownRenderer content={v.questionText || "（无题干）"} />
-                                                    </div>
-                                                    <div className="mt-3 h-36 border-t border-dashed border-gray-300 dark:border-gray-600 print:border-gray-300" />
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                ))}
+                {sortMode === "tag"
+                    ? groups.map(([tag, groupItems]) => (
+                          <div key={tag} className="mb-6">
+                              <h3 className="font-bold text-base mb-3 border-b pb-2 print:break-after-avoid">
+                                  {tag}（{groupItems.length} {t.filter?.dueItems || "题"}）
+                              </h3>
+                              {groupItems.map(renderItem)}
+                          </div>
+                      ))
+                    : items.map(renderItem)}
             </div>
         </>
     );
 }
 
 export default function ReviewPrintPage() {
-    const { t } = useLanguage();
     return (
         <Suspense
             fallback={

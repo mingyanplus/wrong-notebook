@@ -9,6 +9,17 @@ export interface PaginatedResponse<T> {
     totalPages: number;
 }
 
+/** /api/review/due 返回条目（横幅列表与打印复习卷共用；图片大字段仅 include=image 时存在，由打印页子类型补齐） */
+export interface DueReviewItem {
+    scheduleId: string;
+    overdueDays: number;
+    errorItem: {
+        id: string;
+        questionText: string | null;
+        knowledgeTags?: string[];
+    };
+}
+
 export interface Tag {
     id: string;
     name: string;

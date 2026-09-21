@@ -4,6 +4,8 @@
  * 权重供薄弱度模型使用：知识性错因 > 操作性错因
  */
 
+import type { Prisma } from "@prisma/client";
+
 export type ErrorCategoryCode =
     // 核心错因
     | "concept"      // 概念不清
@@ -57,6 +59,23 @@ export function getErrorCategory(code: string): ErrorCategoryDef | undefined {
 export function getErrorCategoryLabel(code: string | null | undefined): string {
     if (!code) return "未分类";
     return getErrorCategory(code)?.label ?? code;
+}
+
+// ── 错因筛选 where 构造（/api/error-items/list 与 /api/review/due 共用）──
+
+/**
+ * 构造错因筛选的 Prisma where 片段：
+ * - codes 含哨兵（未分类）时，未分类与具体错因为 OR 关系；
+ * - 只勾哨兵 → errorCategory 为 null；空数组 → 空对象（不过滤）。
+ * @param uncategorized 哨兵值：列表筛选用 "unknown"，复习重点设置用 "uncategorized"
+ */
+export function buildErrorCategoryWhere(codes: string[], uncategorized: string): Prisma.ErrorItemWhereInput {
+    const real = codes.filter((c) => c !== uncategorized);
+    const hasUncategorized = real.length < codes.length;
+    if (real.length === 0) return hasUncategorized ? { errorCategory: null } : {};
+    return hasUncategorized
+        ? { OR: [{ errorCategory: { in: real } }, { errorCategory: null }] }
+        : { errorCategory: { in: real } };
 }
 
 /** 获取某学科可用的错因列表（学科名支持中文或英文 key） */
