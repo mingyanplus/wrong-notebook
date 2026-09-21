@@ -21,6 +21,7 @@ interface DueItem extends DueReviewItem {
     errorItem: DueReviewItem["errorItem"] & {
         originalImageUrl: string;
         imageMasks: ImageMask[];
+        requiresImage: boolean | null;
     };
 }
 
@@ -36,15 +37,10 @@ interface VariantItem {
 /** 打印勾选行的难度顺序（常用档在前），展示名走 t.reviewPrint.variantLevels */
 const VARIANT_LEVELS: DifficultyLevel[] = ["medium", "hard", "harder", "easy"];
 
-/** 题干是否依赖原图（几何图/函数图像/示意图）：
- *  1) 图类关键词（基于 446 道真实题干提取：如图/图中/图像等命中 60 题）；
- *  2) 几何名词 + 顶点字母同现（兜住「平行四边形 ABCD 中…」这类题干不提图但必须给图的，实测精确命中 2 题零误伤） */
-const IMAGE_HINT_RE = /如图|图所示|图中|图示|图像|图形|示意图|下图|上图|左图|右图|平面图|数轴|坐标/;
-const GEO_SHAPE_RE = /(△|三角形|平行四边形|正方形|长方形|矩形|梯形|菱形|圆)[\s\S]{0,20}?\$?[A-Z]{1,4}\$?/;
-
-function imageNeededFor(questionText: string | null | undefined): boolean {
-    const text = questionText ?? "";
-    return IMAGE_HINT_RE.test(text) || GEO_SHAPE_RE.test(text);
+/** 题干是否需要配原图：与组卷打印 smart 模式同口径——AI 判定的 requiresImage
+ *  （null=未判断，保守显示；仅明确 false 才隐藏，纯文字题不占版面） */
+function imageNeededFor(item: DueItem["errorItem"]): boolean {
+    return item.requiresImage !== false;
 }
 
 /** 估算文本打印行数（正文列约 40 字/行） */
@@ -141,7 +137,7 @@ function ReviewPrintContent() {
             // 纯文字题不显示原图，也不必处理
             await Promise.all(
                 items
-                    .filter((i) => i.errorItem.originalImageUrl && imageNeededFor(i.errorItem.questionText))
+                    .filter((i) => i.errorItem.originalImageUrl && imageNeededFor(i.errorItem))
                     .map((i) => getRedFilteredImage(i.errorItem.originalImageUrl, redFilterOptions))
             );
         }
@@ -170,7 +166,7 @@ function ReviewPrintContent() {
     // 单题块（分组与平铺两种渲染共用；seq 闭包递增保证全卷连续题号）
     const renderItem = (d: DueItem) => {
         const no = ++seq;
-        const showImage = !!d.errorItem.originalImageUrl && imageNeededFor(d.errorItem.questionText);
+        const showImage = !!d.errorItem.originalImageUrl && imageNeededFor(d.errorItem);
         const questionLines = estimateLines(d.errorItem.questionText);
         return (
             <div key={d.errorItem.id} className="mb-6 print:break-inside-avoid">

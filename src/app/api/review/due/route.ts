@@ -77,7 +77,7 @@ export async function GET(req: Request) {
                         id: true,
                         questionText: true,
                         ...(includeImage
-                            ? { originalImageUrl: true, imageMasks: true } // 复习卷打印用（去红 + 遮罩）
+                            ? { originalImageUrl: true, imageMasks: true, requiresImage: true } // 复习卷打印用（去红 + 遮罩 + 原图按需显示）
                             : {}),
                         knowledgePoints: true, // 老数据回退用（tags 为空时）
                         tags: { select: { name: true } },
@@ -100,6 +100,7 @@ export async function GET(req: Request) {
                     ? {
                           originalImageUrl: s.errorItem.originalImageUrl,
                           imageMasks: parseImageMasks(s.errorItem.imageMasks),
+                          requiresImage: s.errorItem.requiresImage,
                       }
                     : {}),
                 // 知识点标签优先，老数据回退 knowledgePoints JSON（与错题列表口径一致）
