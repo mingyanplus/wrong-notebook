@@ -57,6 +57,7 @@ dist-scripts
 
 # Local Database
 *.db
+*.db.bak
 *.db-journal
 *.sqlite
 *.sqlite-journal
