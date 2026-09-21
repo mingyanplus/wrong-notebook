@@ -26,6 +26,7 @@ export interface AzureConfig {
     deploymentName?: string; // 部署名称
     apiVersion?: string;     // API 版本
     model?: string;          // 显示用模型名
+    requestTimeoutMs?: number; // SDK 请求超时（工厂注入：env AI_HTTP_TIMEOUT > 网页 timeouts.analyze > 默认 600s）
 }
 
 export class AzureOpenAIProvider implements AIService {
@@ -56,6 +57,7 @@ export class AzureOpenAIProvider implements AIService {
             endpoint: endpoint,
             deployment: deployment,
             apiVersion: config?.apiVersion || '2024-02-15-preview',
+            timeout: config?.requestTimeoutMs, // 不传则 SDK 默认 10 分钟；由工厂按网页设置/环境变量注入
         });
 
         this.model = config?.model || deployment;

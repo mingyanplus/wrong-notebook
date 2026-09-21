@@ -37,6 +37,7 @@ export class OpenAIProvider implements AIService {
         this.openai = new OpenAI({
             apiKey: apiKey,
             baseURL: baseURL || undefined,
+            timeout: config?.requestTimeoutMs, // 不传则 SDK 默认 10 分钟；由工厂按网页设置/环境变量注入
             defaultHeaders: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             },
