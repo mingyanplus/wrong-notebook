@@ -56,6 +56,9 @@ RUN apk add --no-cache su-exec openssl \
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
+# bcryptjs 3.x 的 exports 把 CJS 入口指向 umd/index.js，standalone trace（ESM 视角）只带 index.js；
+# entrypoint 的 seed-admin.js 走 require，需补拷完整包，否则容器启动报 MODULE_NOT_FOUND
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/bcryptjs ./node_modules/bcryptjs
 
 COPY --from=builder /app/public ./public
 
