@@ -142,6 +142,8 @@ async function generateForItem(errorItemId: string, settings: VariantSettings): 
         }),
     ]);
     if (!item || !item.questionText) return; // 无题干无法生成
+    // 提为局部 const：闭包（下方退避重试包装）内不保留属性级非空收窄
+    const questionText = item.questionText;
 
     const tags = parseLegacyKnowledgePoints(item.knowledgePoints);
     const existingCount = new Map(existing.map((e) => [e.difficulty, e._count._all]));
@@ -164,7 +166,7 @@ async function generateForItem(errorItemId: string, settings: VariantSettings): 
     // 限流退避 + 全局节流在此封装内（见 callAiWithRateLimitRetry）
     const result = await callAiWithRateLimitRetry(() =>
         ai.generateSimilarQuestions(
-            item.questionText,
+            questionText,
             tags,
             requests,
             undefined,
