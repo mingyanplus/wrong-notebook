@@ -2,6 +2,7 @@
  * 变式题后台生成器：按用户配置为错题补齐各难度变式题（VariantQuestion 题库）。
  * 一次 AI 请求按缺额清单批量生成多道变式（解构原题的思考成本只付一次），
  * 同一错题内不再逐题逐难度串行请求。
+ * 速率保护（防 429）：全局请求间隔（VARIANT_REQUEST_INTERVAL 秒，默认 10）+ 限流自动退避重试。
  * 进程内并发队列执行（并发 2：AI 生成是网络重活，防限流）；单题失败跳过，
  * 因按「缺额」补齐，补齐轮结束后重算缺额、仍有缺口自动再排一轮（≤MAX_BACKFILL_ROUNDS 轮），
  * 错题入库触发的任务下次入库/补齐时也会自然重试。
@@ -25,6 +26,51 @@ const logger = createLogger('variant-generator');
 
 // 并发上限：默认 2 路并行（AI 生成是网络重活，防限流）；可用环境变量 VARIANT_MAX_CONCURRENCY 覆盖（1-8）
 const MAX_CONCURRENCY = Math.min(8, Math.max(1, Number(process.env.VARIANT_MAX_CONCURRENCY) || 2));
+
+// ── 速率保护：全局请求间隔 + 429 退避重试 ──────────────────────
+// 相邻 AI 请求的最小间隔（毫秒），从源头控制 RPM，防止批量补齐时打满 AI 服务速率限制；
+// 环境变量 VARIANT_REQUEST_INTERVAL 可调（秒，0 = 关闭）
+const REQUEST_INTERVAL_MS = Math.max(0, (Number(process.env.VARIANT_REQUEST_INTERVAL) || 10) * 1000);
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// 链式节流：保证并发 worker 串行判定间隔（即使间隔为 0 也维持调用点统一）
+let lastRequestAt = 0;
+let throttleChain: Promise<void> = Promise.resolve();
+function throttle(): Promise<void> {
+    const run = throttleChain.then(async () => {
+        const wait = lastRequestAt + REQUEST_INTERVAL_MS - Date.now();
+        if (wait > 0) await sleep(wait);
+        lastRequestAt = Date.now();
+    });
+    throttleChain = run.catch(() => {});
+    return run;
+}
+
+/** 限流类错误判定（provider 抛出的 AI_QUOTA_EXCEEDED / 429 / 速率限制类消息） */
+function isRateLimitError(e: unknown): boolean {
+    const msg = e instanceof Error ? e.message : String(e);
+    return msg.includes('AI_QUOTA_EXCEEDED') || msg.includes('429') || msg.includes('速率限制') || msg.includes('rate limit');
+}
+
+/**
+ * 变式生成 AI 调用：先过全局节流；遇限流（429）自动退避重试（60s/120s/180s 递增，最多 3 次），
+ * 仍失败或其他错误照常抛出（由补齐轮次兜底）。
+ */
+async function callAiWithRateLimitRetry<T>(fn: () => Promise<T>): Promise<T> {
+    const MAX_RATE_LIMIT_RETRIES = 3;
+    for (let attempt = 0; ; attempt++) {
+        await throttle();
+        try {
+            return await fn();
+        } catch (e) {
+            if (!isRateLimitError(e) || attempt >= MAX_RATE_LIMIT_RETRIES) throw e;
+            const backoffMs = 60_000 * (attempt + 1);
+            logger.warn({ attempt: attempt + 1, backoffMs }, 'Variant generation rate-limited, backing off');
+            await sleep(backoffMs);
+        }
+    }
+}
 
 // 进程内并发队列：N 个 worker 消费同一等待队列。
 // 注意：只让「单题生成」级别的叶子任务入队，轮次调度（runBackfillRound）直接异步执行，
@@ -115,13 +161,16 @@ async function generateForItem(errorItemId: string, settings: VariantSettings): 
         : undefined;
 
     const ai = getAIService();
-    const result = await ai.generateSimilarQuestions(
-        item.questionText,
-        tags,
-        requests,
-        undefined,
-        item.gradeSemester,
-        mistakeHint
+    // 限流退避 + 全局节流在此封装内（见 callAiWithRateLimitRetry）
+    const result = await callAiWithRateLimitRetry(() =>
+        ai.generateSimilarQuestions(
+            item.questionText,
+            tags,
+            requests,
+            undefined,
+            item.gradeSemester,
+            mistakeHint
+        )
     );
     if (result.length > 0) {
         await prisma.variantQuestion.createMany({

@@ -153,6 +153,7 @@ cp .env.example .env
 | `HTTP_PROXY` | HTTP 代理 | 无 | 设置 HTTP 代理 |
 | `HTTPS_PROXY` | HTTPS 代理 | 无 | 设置 HTTPS 代理 |
 | `VARIANT_MAX_CONCURRENCY` | 变式生成并发数 | `2` | 可选 1-8；变式题库补齐与智能组卷共用。调大可提速，但可能触发 AI 服务限流（单题失败会自动跳过并重试） |
+| `VARIANT_REQUEST_INTERVAL` | 变式生成相邻请求间隔（秒） | `10` | 防止批量补齐打满 AI 服务速率限制（429）；设 0 关闭。遇 429 还会自动退避 60/120/180 秒重试 |
 | `AI_HTTP_TIMEOUT` | 后端 AI 请求超时（毫秒） | 网页设置值 | 覆盖网页「AI 分析超时」设置；未设置时取网页值（最低 600000），思考模型响应慢时可调大 |
 
 **AI 配置**
